@@ -1,0 +1,14 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.env
+.DS_Store
+.streamlit/secrets.toml
+data/cache/*
+!data/cache/.gitkeep
+data/raw/*
+!data/raw/.gitkeep
+data/master.parquet
+*.egg-info/
+.pytest_cache/
