@@ -24,9 +24,25 @@ def fec_bars(row: pd.Series, cycle: str = "2024") -> go.Figure:
         vals.append(float(row[k]) if k in row.index and pd.notna(row[k]) else 0.0)
 
     colors = ["#e81b23", "#a01218", "#00aef3", "#006b9a"]
+
+    def _money_label(v: float) -> str:
+        if abs(v) >= 1_000_000:
+            m = v / 1_000_000
+            return f"${m:,.1f}M" if abs(m - round(m)) > 0.05 else f"${int(round(m)):,}M"
+        if abs(v) >= 1_000:
+            return f"${int(round(v / 1_000)):,}K"
+        return f"${int(round(v)):,}"
+
     fig = go.Figure(
         data=[
-            go.Bar(x=labels, y=vals, marker_color=colors, text=[f"${v/1e6:.2f}M" for v in vals], textposition="auto")
+            go.Bar(
+                x=labels,
+                y=vals,
+                marker_color=colors,
+                text=[_money_label(v) for v in vals],
+                textposition="auto",
+                hovertemplate="%{x}: $%{y:,.0f}<extra></extra>",
+            )
         ]
     )
     fig.update_layout(
@@ -35,10 +51,11 @@ def fec_bars(row: pd.Series, cycle: str = "2024") -> go.Figure:
         height=320,
         margin=dict(l=40, r=20, t=50, b=40),
         template="plotly_white",
+        yaxis_tickformat="$,.0f",
     )
     if c == "2024" and "fec_outside_2024" in row.index and pd.notna(row["fec_outside_2024"]):
         fig.add_annotation(
-            text=f"Outside spending (2024): ${float(row['fec_outside_2024'])/1e6:.2f}M",
+            text=f"Outside spending (2024): {_money_label(float(row['fec_outside_2024']))}",
             xref="paper",
             yref="paper",
             x=0.5,
@@ -81,7 +98,14 @@ def top_rivs_bar(df: pd.DataFrame, n: int = 15) -> go.Figure:
             "abandon": "#f59e0b",  # amber — do not double-down
         },
     )
-    fig.update_layout(height=420, margin=dict(l=60, r=20, t=50, b=40), template="plotly_white")
+    fig.update_layout(
+        height=420,
+        margin=dict(l=60, r=20, t=50, b=40),
+        template="plotly_white",
+        xaxis_title="RIVS",
+        yaxis_title="District",
+    )
+    fig.update_traces(hovertemplate="%{y}: RIVS %{x:.2f}<extra></extra>")
     return fig
 
 

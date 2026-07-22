@@ -32,6 +32,15 @@ from src.fec_client import get_api_key as get_fec_key  # noqa: E402
 from src.fec_pipeline import fetch_and_merge_fec  # noqa: E402
 from src.data_loader import list_states, load_geojson, load_master  # noqa: E402
 from src.map_builder import build_district_map, build_simple_state_centroids_map  # noqa: E402
+from src.formatters import (  # noqa: E402
+    COLUMN_HELP,
+    format_display_frame,
+    fmt_int,
+    fmt_money,
+    fmt_num,
+    fmt_pct,
+    fmt_pvi,
+)
 from src.rivs import budget_simulation, compute_rivs, format_money  # noqa: E402
 from src.ui_state import render_state_chamber_tab  # noqa: E402
 
@@ -121,14 +130,20 @@ def resolve_master(
 
 def sidebar_controls(df: pd.DataFrame) -> dict:
     st.sidebar.title("⚾ Controls")
-    st.sidebar.caption("Filters & RIVS algorithm knobs")
+    st.sidebar.caption("Hover (?) icons for brief explainers")
 
     states = list_states(df)
-    sel_states = st.sidebar.multiselect("State(s)", states, default=[])
+    sel_states = st.sidebar.multiselect(
+        "State(s)",
+        states,
+        default=[],
+        help="Limit the map and tables to selected states. Leave empty for all 50 + DC districts in the master.",
+    )
     party = st.sidebar.multiselect(
         "Party control",
         ["R", "D", "VACANT"],
         default=["R", "D", "VACANT"],
+        help="Filter by party currently holding the seat (R = Republican, D = Democrat).",
     )
     modes = st.sidebar.multiselect(
         "Mode",
@@ -136,29 +151,37 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         default=["attack", "defend", "abandon", "safe"],
         help=(
             "attack = flip targets · defend = protect holds · "
-            "abandon = competitive but capital is better spent across many races · "
-            "safe = deep seats"
+            "abandon = capital better spent across many races · "
+            "safe = deep seats with little ROI"
         ),
     )
-    rivs_min = st.sidebar.slider("Min RIVS (after compute)", 0.0, 50.0, 0.0, 0.5)
+    rivs_min = st.sidebar.slider(
+        "Min RIVS (after compute)",
+        0.0,
+        50.0,
+        0.0,
+        0.5,
+        help="Hide districts whose Republican Investment Value Score is below this floor.",
+    )
     competitive_only = st.sidebar.checkbox(
         "Map: competitive only (attack/defend)",
         False,
-        help="Hides safe and abandon on the map layer filter",
+        help="On the map, show only attack/defend seats (hide safe and abandon polygons).",
     )
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("RIVS parameters")
+    st.sidebar.caption("Tune the moneyball score formula live (hover controls for detail).")
     with st.sidebar.expander("What is RIVS?", expanded=False):
         st.markdown(
             r"""
 **RIVS** = \(\frac{\text{Expected Prob Gain} \times \text{Seat Priority}}{\text{Incremental Cost}}\)
 
-- **Expected Prob Gain**: how much R win probability you can buy toward the risk threshold  
-- **Seat Priority**: marginal seats + path to majority + attack/defend weights  
-- **Incremental Cost**: FEC-based cost to compete (+ outside spend), scaled by difficulty  
+- **Expected Prob Gain**: win probability you can buy toward the risk threshold  
+- **Seat Priority**: marginal seats × path to majority × attack/defend weights  
+- **Incremental Cost**: FEC-based cost to compete (+ outside spend)  
 - **Long-term factor**: open seats / infrastructure bonus  
-- **Abandon**: competitive seats where $ is better split across multiple cheaper races  
+- **Abandon**: competitive seats where $ is better split across cheaper races  
             """
         )
 
@@ -170,7 +193,7 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         b["cost_sensitivity"][1],
         d["cost_sensitivity"],
         0.05,
-        help="Higher = treat dollars as more expensive → lower RIVS for costly districts",
+        help="Scales modeled spend. Higher = dollars are scarcer → costly districts score lower.",
     )
     long_term = st.sidebar.slider(
         "Long-term multiplier",
@@ -178,7 +201,7 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         b["long_term_multiplier"][1],
         d["long_term_multiplier"],
         0.05,
-        help="Boost open seats / long-term infrastructure value",
+        help="Boosts open seats and long-term infrastructure value in RIVS.",
     )
     risk = st.sidebar.slider(
         "Risk tolerance (target P*)",
@@ -186,7 +209,7 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         b["risk_tolerance"][1],
         d["risk_tolerance"],
         0.01,
-        help="Target R win probability threshold for 'enough' investment",
+        help="Target Republican win probability that counts as 'enough' investment (e.g. 0.52).",
     )
     w_attack = st.sidebar.slider(
         "Attack weight (flips)",
@@ -194,6 +217,7 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         b["w_attack"][1],
         d["w_attack"],
         0.05,
+        help="Priority multiplier for flipping opposition-held seats.",
     )
     w_defend = st.sidebar.slider(
         "Defend weight (holds)",
@@ -201,6 +225,7 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         b["w_defend"][1],
         d["w_defend"],
         0.05,
+        help="Priority multiplier for protecting vulnerable Republican seats.",
     )
     inc_bonus = st.sidebar.slider(
         "Incumbent bonus",
@@ -208,6 +233,7 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         b["incumbent_bonus"][1],
         d["incumbent_bonus"],
         0.01,
+        help="How much an incumbent shifts baseline win probability (R up / D down).",
     )
     open_vol = st.sidebar.slider(
         "Open-seat volatility",
@@ -215,13 +241,14 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         b["open_seat_volatility"][1],
         d["open_seat_volatility"],
         0.01,
+        help="Pulls open-seat win odds toward a coin flip (more uncertainty).",
     )
 
     st.sidebar.markdown("##### Abandon (don't double-down)")
     abandon_enabled = st.sidebar.checkbox(
         "Enable abandon mode",
         value=bool(d["abandon_enabled"]),
-        help="Flag races where concentrating spend is untenable vs spreading $",
+        help="Flag races where concentrating spend is untenable vs spreading $ across other seats.",
     )
     abandon_pct = st.sidebar.slider(
         "Abandon cost/gain percentile",
@@ -229,7 +256,7 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         b["abandon_cost_percentile"][1],
         d["abandon_cost_percentile"],
         0.01,
-        help="Competitive seats above this $/ΔP percentile become abandon (if also ≥ min cost)",
+        help="Among competitive seats, those above this $/gain percentile can be marked abandon.",
         disabled=not abandon_enabled,
     )
     abandon_min_m = st.sidebar.slider(
@@ -238,7 +265,7 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         b["abandon_min_cost_m"][1],
         d["abandon_min_cost_m"],
         0.5,
-        help="Never abandon races cheaper than this absolute floor",
+        help="Never abandon a race cheaper than this absolute dollar floor.",
         disabled=not abandon_enabled,
     )
     abandon_alts = st.sidebar.slider(
@@ -247,7 +274,7 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         b["abandon_alt_races"][1],
         int(d["abandon_alt_races"]),
         1,
-        help="If this seat costs ≥ N × median competitive race, compare gains",
+        help="If this seat costs ≥ N × median competitive race, compare total gains.",
         disabled=not abandon_enabled,
     )
     abandon_gain_ratio = st.sidebar.slider(
@@ -256,7 +283,7 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         b["abandon_alt_gain_ratio"][1],
         d["abandon_alt_gain_ratio"],
         0.05,
-        help="Abandon if N median races yield more than this seat × ratio",
+        help="Abandon if N median races yield more gain than this seat × ratio.",
         disabled=not abandon_enabled,
     )
 
@@ -266,6 +293,7 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         max_value=TOTAL_HOUSE_SEATS,
         value=DEFAULT_TARGET_SEATS,
         step=1,
+        help="Strategic House majority target (default 230 = comfortable majority).",
     )
     budget_m = st.sidebar.slider(
         "Budget simulation ($M)",
@@ -273,16 +301,23 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         b["budget_millions"][1],
         d["budget_millions"],
         1.0,
+        help="Simulated dollars to allocate greedily down the RIVS ranking.",
     )
     skip_abandon_budget = st.sidebar.checkbox(
         "Budget sim: skip abandon seats",
         value=True,
-        help="Do not allocate simulated dollars into abandon races",
+        help="Do not pour simulated dollars into abandon-flagged races.",
     )
-    fec_cycle = st.sidebar.selectbox("FEC cycle (detail charts)", ["2026", "2024", "2022"], index=1)
+    fec_cycle = st.sidebar.selectbox(
+        "FEC cycle (detail charts)",
+        ["2026", "2024", "2022"],
+        index=1,
+        help="Which election cycle’s raised/spent totals to chart in district detail.",
+    )
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("Data APIs")
+    st.sidebar.caption("Live data keys and refresh controls.")
     fec_ok = get_fec_key() is not None
     civic_ok = get_civic_key() is not None
     st.sidebar.write("OpenFEC key:", "✅ set" if fec_ok else "⚪ not set")
@@ -292,14 +327,14 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
     include_outside = st.sidebar.checkbox(
         "Include 2024 outside spending (IE)",
         value=False,
-        help="Much slower (~all 435 districts). Default is candidate totals only (2022/2024/2026).",
+        help="Also pull independent expenditures by district (slow: all 435). Default = candidate totals only.",
         disabled=not fec_ok,
     )
     force_fec = st.sidebar.button(
         "Refresh FEC data now",
         type="primary",
         disabled=not fec_ok,
-        help="Pull from OpenFEC API and rebuild master (cached 12h unless forced).",
+        help="Force a new OpenFEC pull and rebuild the master table (otherwise cached ~12h).",
     )
     if not fec_ok:
         st.sidebar.caption(
@@ -311,7 +346,10 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
             "Use the button to force a new pull."
         )
 
-    if st.sidebar.button("List Civic elections (live)"):
+    if st.sidebar.button(
+        "List Civic elections (live)",
+        help="Call Google Civic electionQuery to list VIP-supported elections (needs Civic key).",
+    ):
         if not civic_ok:
             st.sidebar.warning("Set GOOGLE_CIVIC_API_KEY in secrets or .env")
         else:
@@ -364,11 +402,27 @@ def apply_filters(ranked: pd.DataFrame, ctl: dict) -> pd.DataFrame:
 def render_detail(row: pd.Series, fec_cycle: str) -> None:
     st.subheader(f"{row['district_id']} — detail")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("RIVS", f"{float(row['rivs']):.2f}", help=f"Rank #{int(row['rivs_rank'])}")
-    c2.metric("PVI (R+)", f"{float(row['pvi']):+.1f}")
-    c3.metric("R win P₀", f"{float(row['baseline_win_prob_r']):.1%}")
+    c1.metric(
+        "RIVS",
+        fmt_num(row["rivs"], decimals=2),
+        help=f"Republican Investment Value Score. Rank #{fmt_int(row['rivs_rank'])} (higher = better ROI).",
+    )
+    c2.metric(
+        "PVI (R+)",
+        fmt_pvi(row["pvi"]),
+        help="Lean score with R positive. Synthetic/PVI-like unless you supply official ratings.",
+    )
+    c3.metric(
+        "R win P₀",
+        fmt_pct(row["baseline_win_prob_r"]),
+        help="Modeled Republican win probability before new spending.",
+    )
     mode = str(row["mode"]).lower()
-    c4.metric("Mode", mode.title())
+    c4.metric(
+        "Mode",
+        mode.title(),
+        help="attack=flip · defend=hold · abandon=redeploy $ · safe=deep seat",
+    )
 
     if mode == "abandon":
         st.warning(
@@ -390,46 +444,66 @@ def render_detail(row: pd.Series, fec_cycle: str) -> None:
     )
     if pd.notna(row.get("first_elected")):
         st.caption(
-            f"First elected: {int(row['first_elected'])} · "
-            f"Tenure ≈ {float(row.get('tenure_years') or 0):.0f} yrs · "
+            f"First elected: {fmt_int(row['first_elected'])} · "
+            f"Tenure ≈ {fmt_int(row.get('tenure_years') or 0)} yrs · "
             f"Incumbent running: {bool(row.get('incumbent_running'))}"
         )
 
     st.markdown("##### Demographics (ACS-style)")
     d1, d2, d3, d4 = st.columns(4)
-    d1.metric("Population", f"{int(row['pop_total']):,}")
-    d2.metric("VAP", f"{int(row['vap']):,}")
-    d3.metric("Median income", f"${float(row['median_income']):,.0f}")
-    d4.metric("BA+", f"{float(row['pct_ba_plus']):.1%}")
+    d1.metric("Population", fmt_int(row["pop_total"]), help="Total population estimate for the district.")
+    d2.metric("VAP", fmt_int(row["vap"]), help="Voting-age population.")
+    d3.metric("Median income", fmt_money(row["median_income"]), help="Median household income.")
+    d4.metric("BA+", fmt_pct(row["pct_ba_plus"]), help="Share of adults with bachelor’s degree or higher.")
     e1, e2 = st.columns(2)
     with e1:
         st.plotly_chart(demographics_pie(row), use_container_width=True)
     with e2:
         st.write(
             {
-                "pct_urban": f"{float(row['pct_urban']):.1%}",
-                "pct_white": f"{float(row['pct_white']):.1%}",
-                "pct_black": f"{float(row['pct_black']):.1%}",
-                "pct_hispanic": f"{float(row['pct_hispanic']):.1%}",
-                "pct_asian": f"{float(row['pct_asian']):.1%}",
+                "pct_urban": fmt_pct(row["pct_urban"]),
+                "pct_white": fmt_pct(row["pct_white"]),
+                "pct_black": fmt_pct(row["pct_black"]),
+                "pct_hispanic": fmt_pct(row["pct_hispanic"]),
+                "pct_asian": fmt_pct(row["pct_asian"]),
             }
         )
 
     st.markdown("##### 2026 race / candidates")
     cands = parse_candidates(row)
     if cands:
-        st.dataframe(pd.DataFrame(cands), use_container_width=True, hide_index=True)
+        cdf = pd.DataFrame(cands)
+        if "receipts" in cdf.columns:
+            cdf["receipts"] = cdf["receipts"].map(fmt_money)
+        st.dataframe(cdf, use_container_width=True, hide_index=True)
     else:
         st.info("No candidate payload in master row (mock or Civic cache empty).")
 
     st.markdown("##### RIVS breakdown")
     b1, b2, b3, b4 = st.columns(4)
-    b1.metric("Prob gain", f"{float(row['expected_prob_gain']):.3f}")
-    b2.metric("Seat priority", f"{float(row['seat_priority']):.3f}")
-    b3.metric("Incremental cost", format_money(float(row["incremental_cost"])))
-    b4.metric("Long-term factor", f"{float(row['long_term_factor']):.2f}")
+    b1.metric(
+        "Prob gain",
+        fmt_num(row["expected_prob_gain"], decimals=3),
+        help="Expected increase in R win probability if fully funded to threshold.",
+    )
+    b2.metric(
+        "Seat priority",
+        fmt_num(row["seat_priority"], decimals=2),
+        help="Strategic weight: marginality × path to majority × mode weights.",
+    )
+    b3.metric(
+        "Incremental cost",
+        fmt_money(row["incremental_cost"]),
+        help="Modeled dollars needed to realize the probability gain.",
+    )
+    b4.metric(
+        "Long-term factor",
+        fmt_num(row["long_term_factor"], decimals=2),
+        help="Multiplier for open seats / infrastructure value.",
+    )
 
     st.markdown(f"##### FEC finance — {fec_cycle}")
+    st.caption("Raised and spent by party from OpenFEC (or mock if not refreshed).")
     st.plotly_chart(fec_bars(row, cycle=fec_cycle), use_container_width=True)
 
 
@@ -500,23 +574,44 @@ def render_federal_house_tab() -> None:
     n_defend = int((ranked["mode"] == "defend").sum())
     baseline_seats = sim["baseline_expected_r_seats"]
     k1, k2, k3, k4, k5, k6 = st.columns(6)
-    k1.metric("R-held (control)", r_held)
-    k2.metric("Expected R seats (P₀ sum)", f"{baseline_seats:.1f}")
-    k3.metric(
-        f"After ${ctl['budget_m']:.0f}M top-RIVS",
-        f"{sim['expected_r_seats_after']:.1f}",
-        delta=f"+{sim['total_prob_gain']:.2f} seats",
+    k1.metric(
+        "R-held (control)",
+        fmt_int(r_held),
+        help="House seats currently coded Republican in the master table.",
     )
-    k4.metric("Attack / Defend", f"{n_attack} / {n_defend}")
-    k5.metric("Abandon", n_abandon, help="High-cost races — redeploy $ elsewhere")
-    k6.metric("Districts shown", len(filtered))
+    k2.metric(
+        "Expected R seats (P₀ sum)",
+        fmt_num(baseline_seats, decimals=1),
+        help="Sum of baseline R win probabilities across all districts (soft seat count).",
+    )
+    k3.metric(
+        f"After {fmt_money(ctl['budget_m'] * 1_000_000)} top-RIVS",
+        fmt_num(sim["expected_r_seats_after"], decimals=1),
+        delta=f"+{fmt_num(sim['total_prob_gain'], decimals=2)} seats",
+        help="Expected R seats after greedily funding top RIVS districts up to the budget.",
+    )
+    k4.metric(
+        "Attack / Defend",
+        f"{fmt_int(n_attack)} / {fmt_int(n_defend)}",
+        help="Counts of flip targets vs vulnerable holds under current RIVS modes.",
+    )
+    k5.metric(
+        "Abandon",
+        fmt_int(n_abandon),
+        help="High-cost races where money is better redeployed across multiple seats.",
+    )
+    k6.metric(
+        "Districts shown",
+        fmt_int(len(filtered)),
+        help="Districts remaining after sidebar filters.",
+    )
 
     st.caption(
         f"Data: `{source_label}` · "
-        f"Budget sim funds **{sim['n_districts_funded']}** districts "
-        f"({format_money(sim['spent_usd'])} spent"
+        f"Budget sim funds **{fmt_int(sim['n_districts_funded'])}** districts "
+        f"({fmt_money(sim['spent_usd'])} spent"
         + (
-            f", skipped {sim.get('skipped_abandon', 0)} abandon"
+            f", skipped {fmt_int(sim.get('skipped_abandon', 0))} abandon"
             if ctl["skip_abandon_budget"]
             else ""
         )
@@ -586,11 +681,14 @@ def render_federal_house_tab() -> None:
                 st.warning("Select a district.")
 
         st.markdown("##### Budget simulation — funded districts")
+        st.caption("Greedy fill from highest RIVS until the budget is spent (skips abandon/safe by default).")
         if sim["funded"]:
             fund_df = pd.DataFrame(sim["funded"])
-            fund_df["spend"] = fund_df["spend"].map(format_money)
-            fund_df["gain"] = fund_df["gain"].map(lambda x: f"{x:.3f}")
-            st.dataframe(fund_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                format_display_frame(fund_df),
+                use_container_width=True,
+                hide_index=True,
+            )
         else:
             st.write("No districts funded at this budget / filter combination.")
 
@@ -618,22 +716,12 @@ def render_federal_house_tab() -> None:
             "pop_total",
         ]
         show_cols = [c for c in show_cols if c in filtered.columns]
-        view = filtered[show_cols].copy()
+        st.caption(
+            " | ".join(f"**{c}**: {COLUMN_HELP[c]}" for c in show_cols if c in COLUMN_HELP)[:900]
+            + ("…" if len(show_cols) > 8 else "")
+        )
         st.dataframe(
-            view.style.format(
-                {
-                    "rivs": "{:.2f}",
-                    "pvi": "{:+.1f}",
-                    "baseline_win_prob_r": "{:.1%}",
-                    "expected_prob_gain": "{:.3f}",
-                    "incremental_cost": "${:,.0f}",
-                    "seat_priority": "{:.3f}",
-                    "hist_cost_to_compete": "${:,.0f}",
-                    "median_income": "${:,.0f}",
-                    "pop_total": "{:,.0f}",
-                },
-                na_rep="—",
-            ),
+            format_display_frame(filtered, show_cols),
             use_container_width=True,
             height=560,
         )
@@ -643,6 +731,7 @@ def render_federal_house_tab() -> None:
             data=csv,
             file_name="house_moneyball_filtered.csv",
             mime="text/csv",
+            help="Raw numeric CSV (unformatted) for Excel/Sheets.",
         )
 
     with tab_method:

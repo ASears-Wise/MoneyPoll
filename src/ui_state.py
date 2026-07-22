@@ -9,9 +9,17 @@ import streamlit as st
 
 from config import RIVS_BOUNDS, RIVS_DEFAULTS
 from src.charts import top_rivs_bar
+from src.formatters import (
+    COLUMN_HELP,
+    format_display_frame,
+    fmt_int,
+    fmt_money,
+    fmt_num,
+    fmt_pct,
+    fmt_pvi,
+)
 from src.map_builder import build_district_map, build_simple_state_centroids_map
 from src.openstates_client import get_api_key as get_openstates_key
-from src.rivs import format_money
 from src.state_data import list_states, load_state_geojson, load_state_master, parse_state_candidates
 from src.state_pipeline import fetch_and_overlay_openstates, master_needs_openstates
 from src.state_rivs import chamber_majority_summary, compute_state_rivs, state_budget_simulation
@@ -69,14 +77,16 @@ def _state_finance_bars(row: pd.Series, cycle: str = "2024") -> go.Figure:
     ]
     vals = [float(row[k]) if k in row.index and pd.notna(row[k]) else 0.0 for k in keys]
     colors = ["#e81b23", "#a01218", "#00aef3", "#006b9a"]
+    texts = [fmt_money(v) for v in vals]
     fig = go.Figure(
         data=[
             go.Bar(
                 x=labels,
                 y=vals,
                 marker_color=colors,
-                text=[f"${v/1e3:.0f}K" for v in vals],
+                text=texts,
                 textposition="auto",
+                hovertemplate="%{x}: $%{y:,.0f}<extra></extra>",
             )
         ]
     )
@@ -85,6 +95,7 @@ def _state_finance_bars(row: pd.Series, cycle: str = "2024") -> go.Figure:
         height=300,
         margin=dict(l=40, r=20, t=50, b=40),
         template="plotly_white",
+        yaxis_tickformat="$,.0f",
     )
     return fig
 
@@ -93,6 +104,7 @@ def _rivs_knobs(prefix: str) -> dict[str, Any]:
     """Sidebar knobs namespaced by chamber tab."""
     b, d = RIVS_BOUNDS, RIVS_DEFAULTS
     with st.sidebar.expander(f"RIVS ({prefix})", expanded=False):
+        st.caption("Scores target each state's chamber majority (not federal 230).")
         cost_sensitivity = st.slider(
             f"Cost sensitivity ({prefix})",
             b["cost_sensitivity"][0],
@@ -100,6 +112,7 @@ def _rivs_knobs(prefix: str) -> dict[str, Any]:
             d["cost_sensitivity"],
             0.05,
             key=f"{prefix}_cost",
+            help="Higher = treat dollars as more expensive → lower scores for costly seats.",
         )
         risk = st.slider(
             f"Risk tolerance ({prefix})",
@@ -108,6 +121,7 @@ def _rivs_knobs(prefix: str) -> dict[str, Any]:
             d["risk_tolerance"],
             0.01,
             key=f"{prefix}_risk",
+            help="Target win probability P* that counts as enough investment.",
         )
         w_attack = st.slider(
             f"Attack weight ({prefix})",
@@ -116,6 +130,7 @@ def _rivs_knobs(prefix: str) -> dict[str, Any]:
             d["w_attack"],
             0.05,
             key=f"{prefix}_wa",
+            help="Priority boost for flipping opposition seats.",
         )
         w_defend = st.slider(
             f"Defend weight ({prefix})",
@@ -124,11 +139,13 @@ def _rivs_knobs(prefix: str) -> dict[str, Any]:
             d["w_defend"],
             0.05,
             key=f"{prefix}_wd",
+            help="Priority boost for protecting vulnerable holds.",
         )
         abandon_enabled = st.checkbox(
             f"Enable abandon ({prefix})",
             value=True,
             key=f"{prefix}_ab_en",
+            help="Flag seats where $ is better split across multiple cheaper races.",
         )
         abandon_min = st.slider(
             f"Abandon min cost $M ({prefix})",
@@ -138,6 +155,7 @@ def _rivs_knobs(prefix: str) -> dict[str, Any]:
             0.1,
             key=f"{prefix}_ab_min",
             disabled=not abandon_enabled,
+            help="Never abandon seats cheaper than this floor (state races are cheaper than federal).",
         )
         budget_m = st.slider(
             f"Budget sim $M ({prefix})",
@@ -146,6 +164,7 @@ def _rivs_knobs(prefix: str) -> dict[str, Any]:
             5.0,
             0.5,
             key=f"{prefix}_bud",
+            help="Simulated dollars allocated greedily by RIVS within the filtered seats.",
         )
     return {
         "cost_sensitivity": cost_sensitivity,
@@ -207,9 +226,9 @@ def render_state_chamber_tab(chamber: Chamber) -> None:
 
     if os_stats:
         st.success(
-            f"OpenStates · {os_stats.get('seats_matched', 0)}/"
-            f"{os_stats.get('total_seats', 0)} seats matched · "
-            f"{os_stats.get('states_requested', 0)} states"
+            f"OpenStates · {fmt_int(os_stats.get('seats_matched', 0))}/"
+            f"{fmt_int(os_stats.get('total_seats', 0))} seats matched · "
+            f"{fmt_int(os_stats.get('states_requested', 0))} states"
         )
 
     if raw.empty:
@@ -225,7 +244,7 @@ def render_state_chamber_tab(chamber: Chamber) -> None:
             states,
             default=[],
             key=f"{prefix}_states",
-            help="Empty = all states. Select 1–few for faster maps.",
+            help="Empty = all states in the table. Narrow for focus or faster maps.",
         )
     with c2:
         modes = st.multiselect(
@@ -233,13 +252,14 @@ def render_state_chamber_tab(chamber: Chamber) -> None:
             ["attack", "defend", "abandon", "safe"],
             default=["attack", "defend", "abandon", "safe"],
             key=f"{prefix}_modes",
+            help="attack=flip · defend=hold · abandon=redeploy $ · safe=deep seat",
         )
     with c3:
         map_state = st.selectbox(
             "Map focus state",
             ["(centroids)"] + states,
             key=f"{prefix}_map_st",
-            help="Pick a state to load district polygons when GeoJSON is available.",
+            help="Pick a state for district polygons when GeoJSON exists; otherwise mean-RIVS centroids.",
         )
 
     knobs = _rivs_knobs(prefix)
@@ -285,14 +305,33 @@ def render_state_chamber_tab(chamber: Chamber) -> None:
     n_r_chambers = int(summary["r_controls"].sum()) if len(summary) else 0
 
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Seats shown (R-held)", f"{r_held} / {len(filtered)}")
-    k2.metric("Chambers R controls", n_r_chambers)
-    k3.metric("Chambers short of majority", n_short)
-    k4.metric("Abandon seats", n_ab)
+    k1.metric(
+        "Seats shown (R-held)",
+        f"{fmt_int(r_held)} / {fmt_int(len(filtered))}",
+        help="Republican-held seats among rows after filters / total rows shown.",
+    )
+    k2.metric(
+        "Chambers R controls",
+        fmt_int(n_r_chambers),
+        help="Number of state chambers (in the filter) where R holds majority.",
+    )
+    k3.metric(
+        "Chambers short of majority",
+        fmt_int(n_short),
+        help="Chambers where R is below the majority threshold.",
+    )
+    k4.metric(
+        "Abandon seats",
+        fmt_int(n_ab),
+        help="Seats where concentrating spend is flagged as poor ROI vs spreading $.",
+    )
     k5.metric(
-        f"Budget ${knobs['budget_m']:.1f}M → Δ seats",
-        f"+{sim['total_prob_gain']:.2f}",
-        help=f"Funds {sim['n_districts_funded']} seats across {sim.get('n_states_funded', 0)} states",
+        f"Budget {fmt_money(knobs['budget_m'] * 1_000_000)} → Δ seats",
+        f"+{fmt_num(sim['total_prob_gain'], decimals=2)}",
+        help=(
+            f"Greedy RIVS allocation funds {fmt_int(sim['n_districts_funded'])} seats "
+            f"across {fmt_int(sim.get('n_states_funded', 0))} states."
+        ),
     )
 
     tab_map, tab_table, tab_chambers, tab_method = st.tabs(
@@ -347,16 +386,33 @@ def render_state_chamber_tab(chamber: Chamber) -> None:
 
         with right:
             ids = filtered["district_id"].tolist() if len(filtered) else ranked["district_id"].tolist()
-            pick = st.selectbox("Select seat", ids, key=f"{prefix}_pick")
+            pick = st.selectbox(
+                "Select seat",
+                ids,
+                key=f"{prefix}_pick",
+                help="Open detail metrics, candidates, and finance for this seat.",
+            )
             st.session_state[sel_key] = pick
             row = ranked[ranked["district_id"] == pick]
             if len(row):
                 r = row.iloc[0]
                 st.markdown(f"### {r.get('seat_label', r['district_id'])}")
                 m1, m2, m3 = st.columns(3)
-                m1.metric("RIVS", f"{float(r['rivs']):.2f}")
-                m2.metric("Mode", str(r["mode"]).title())
-                m3.metric("PVI-like", f"{float(r['pvi']):+.1f}")
+                m1.metric(
+                    "RIVS",
+                    fmt_num(r["rivs"], decimals=2),
+                    help="Republican Investment Value Score for this seat (higher = better ROI).",
+                )
+                m2.metric(
+                    "Mode",
+                    str(r["mode"]).title(),
+                    help="attack / defend / abandon / safe",
+                )
+                m3.metric(
+                    "PVI-like",
+                    fmt_pvi(r["pvi"]),
+                    help="Lean score (R positive). Synthetic unless replaced with real ratings.",
+                )
                 if str(r["mode"]).lower() == "abandon":
                     st.warning("**Abandon** — redeploy $ to other seats in this chamber.")
                     if r.get("abandon_reason"):
@@ -364,12 +420,15 @@ def render_state_chamber_tab(chamber: Chamber) -> None:
                 st.write(
                     f"**Member:** {r.get('rep_name')} ({r.get('rep_party')}) · "
                     f"**Control:** {r.get('party_control')} · "
-                    f"**Majority need (state):** {r.get('chamber_majority_threshold')} "
-                    f"(R held ~{r.get('state_r_held')})"
+                    f"**Majority need (state):** {fmt_int(r.get('chamber_majority_threshold'))} "
+                    f"(R held ~{fmt_int(r.get('state_r_held'))})"
                 )
                 cands = parse_state_candidates(r)
                 if cands:
-                    st.dataframe(pd.DataFrame(cands), hide_index=True, use_container_width=True)
+                    cdf = pd.DataFrame(cands)
+                    if "receipts" in cdf.columns:
+                        cdf["receipts"] = cdf["receipts"].map(fmt_money)
+                    st.dataframe(cdf, hide_index=True, use_container_width=True)
                 st.plotly_chart(_state_finance_bars(r, "2024"), use_container_width=True, key=f"{prefix}_fec")
 
     with tab_table:
@@ -394,25 +453,26 @@ def render_state_chamber_tab(chamber: Chamber) -> None:
             ]
             if c in filtered.columns
         ]
-        st.dataframe(filtered[cols], use_container_width=True, height=520)
+        st.caption(
+            "Formatted for display ($ and commas). "
+            + " · ".join(f"{c}: {COLUMN_HELP[c]}" for c in cols if c in COLUMN_HELP)[:700]
+        )
+        st.dataframe(format_display_frame(filtered, cols), use_container_width=True, height=520)
         st.download_button(
             f"Download {chamber} CSV",
             data=filtered.to_csv(index=False).encode("utf-8"),
             file_name=f"state_{chamber}_rivs.csv",
             mime="text/csv",
             key=f"{prefix}_dl",
+            help="Raw unformatted CSV for spreadsheets.",
         )
 
     with tab_chambers:
         st.markdown("##### Path to chamber majority by state")
+        st.caption("One row per state: majority math and mode mix under current filters.")
         if len(summary):
             st.dataframe(
-                summary.style.format(
-                    {
-                        "expected_r_seats": "{:.1f}",
-                        "top_rivs": "{:.2f}",
-                    }
-                ),
+                format_display_frame(summary),
                 use_container_width=True,
                 height=480,
             )
