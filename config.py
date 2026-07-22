@@ -71,7 +71,9 @@ CIVIC_CACHE_TTL_HOURS = 24
 # OpenFEC API — https://api.open.fec.gov/developers/
 FEC_BASE = "https://api.open.fec.gov/v1"
 FEC_CACHE_TTL_HOURS = 24
-FEC_DEFAULT_CYCLES = (2022, 2024, 2026)
+# Current election cycle first (display + hist-cost preference)
+DEFAULT_FEC_CYCLE = 2026
+FEC_DEFAULT_CYCLES = (2026, 2024, 2022)
 
 APP_TITLE = "House Moneyball"
 APP_SUBTITLE = (

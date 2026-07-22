@@ -9,8 +9,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 
-def fec_bars(row: pd.Series, cycle: str = "2024") -> go.Figure:
-    """Raised/spent by party for a cycle."""
+def fec_bars(row: pd.Series, cycle: str = "2026") -> go.Figure:
+    """Raised/spent by party for a cycle (default: current 2026 cycle)."""
     c = str(cycle)
     labels = ["R Raised", "R Spent", "D Raised", "D Spent"]
     keys = [
@@ -19,9 +19,12 @@ def fec_bars(row: pd.Series, cycle: str = "2024") -> go.Figure:
         f"fec_raised_d_{c}",
         f"fec_spent_d_{c}",
     ]
+    # Fall back to prior cycle columns if current-cycle fields are all empty
     vals = []
     for k in keys:
         vals.append(float(row[k]) if k in row.index and pd.notna(row[k]) else 0.0)
+    if sum(vals) == 0 and c == "2026":
+        return fec_bars(row, cycle="2024")
 
     colors = ["#e81b23", "#a01218", "#00aef3", "#006b9a"]
 
@@ -53,9 +56,13 @@ def fec_bars(row: pd.Series, cycle: str = "2024") -> go.Figure:
         template="plotly_white",
         yaxis_tickformat="$,.0f",
     )
-    if c == "2024" and "fec_outside_2024" in row.index and pd.notna(row["fec_outside_2024"]):
+    # Outside spend: prefer matching cycle column, else 2024 IE aggregate
+    outside_key = f"fec_outside_{c}"
+    if outside_key not in row.index or pd.isna(row.get(outside_key)):
+        outside_key = "fec_outside_2024"
+    if outside_key in row.index and pd.notna(row.get(outside_key)) and float(row[outside_key] or 0) > 0:
         fig.add_annotation(
-            text=f"Outside spending (2024): {_money_label(float(row['fec_outside_2024']))}",
+            text=f"Outside spending ({outside_key.split('_')[-1]}): {_money_label(float(row[outside_key]))}",
             xref="paper",
             yref="paper",
             x=0.5,
@@ -83,14 +90,34 @@ def demographics_pie(row: pd.Series) -> go.Figure:
 
 
 def top_rivs_bar(df: pd.DataFrame, n: int = 15) -> go.Figure:
-    top = df.nsmallest(len(df), "rivs_rank").head(n).iloc[::-1]
+    top = df.nsmallest(len(df), "rivs_rank").head(n).copy()
+    # Label with cost to be competitive when available
+    cost_col = (
+        "cost_to_be_competitive"
+        if "cost_to_be_competitive" in top.columns
+        else "hist_cost_to_compete"
+        if "hist_cost_to_compete" in top.columns
+        else "incremental_cost"
+        if "incremental_cost" in top.columns
+        else None
+    )
+    if cost_col:
+        top = top.copy()
+        top["y_label"] = top.apply(
+            lambda r: f"{r['district_id']}  (${float(r[cost_col] or 0):,.0f} to compete)",
+            axis=1,
+        )
+        y_col = "y_label"
+    else:
+        y_col = "district_id"
+    top = top.iloc[::-1]
     fig = px.bar(
         top,
         x="rivs",
-        y="district_id",
+        y=y_col,
         color="mode",
         orientation="h",
-        title=f"Top {n} districts by RIVS",
+        title=f"Top {n} districts by RIVS (label includes cost to be competitive)",
         color_discrete_map={
             "attack": "#e81b23",
             "defend": "#3c3b6e",
@@ -105,7 +132,7 @@ def top_rivs_bar(df: pd.DataFrame, n: int = 15) -> go.Figure:
         xaxis_title="RIVS",
         yaxis_title="District",
     )
-    fig.update_traces(hovertemplate="%{y}: RIVS %{x:.2f}<extra></extra>")
+    fig.update_traces(hovertemplate="%{y}<br>RIVS %{x:.2f}<extra></extra>")
     return fig
 
 

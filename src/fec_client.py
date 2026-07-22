@@ -437,7 +437,7 @@ def build_cycle_frames(
     *,
     api_key: str | None = None,
     fetch_outside: bool = True,
-    outside_cycle: int = 2024,
+    outside_cycle: int = 2026,
     progress: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     """
@@ -446,7 +446,7 @@ def build_cycle_frames(
     Returns (finance_wide, outside_df_or_None).
     finance_wide has one row per district_id with fec_*_{cycle} columns.
     """
-    cycles = cycles or [2022, 2024, 2026]
+    cycles = cycles or [2026, 2024, 2022]
     frames = []
     for cy in cycles:
         if progress:
@@ -529,9 +529,9 @@ def merge_fec_into_master(
         if "fec_outside_2024" not in out.columns and "fec_outside_2024_y" in out.columns:
             out["fec_outside_2024"] = out["fec_outside_2024_y"]
 
-    # hist_cost_to_compete from latest complete cycle with data (prefer 2024)
+    # hist_cost_to_compete from latest complete cycle with data (prefer current 2026)
     def _hist(row: pd.Series) -> float:
-        for cy in (2024, 2022, 2026):
+        for cy in (2026, 2024, 2022):
             r = float(row.get(f"fec_raised_r_{cy}") or 0)
             d = float(row.get(f"fec_raised_d_{cy}") or 0)
             if r + d > 0:

@@ -15,7 +15,7 @@ from src.state_rivs import compute_state_rivs
 META_PATH = DATA_DIR / "refresh_meta.json"
 STATE_META_PATH = STATE_DATA_DIR / "refresh_meta.json"
 
-# Default visible table columns (fast scan)
+# Default visible table columns (fast scan) — cost to compete always near the front
 FEDERAL_SLIM_COLS = [
     "rivs_rank",
     "district_id",
@@ -23,6 +23,7 @@ FEDERAL_SLIM_COLS = [
     "party_control",
     "mode",
     "rivs",
+    "cost_to_be_competitive",
     "incremental_cost",
     "rep_name",
 ]
@@ -36,6 +37,8 @@ FEDERAL_EXTRA_COLS = [
     "seat_priority",
     "is_open_seat",
     "hist_cost_to_compete",
+    "fec_raised_r_2026",
+    "fec_raised_d_2026",
     "abandon_reason",
     "median_income",
     "pop_total",
@@ -48,6 +51,7 @@ STATE_SLIM_COLS = [
     "party_control",
     "mode",
     "rivs",
+    "cost_to_be_competitive",
     "incremental_cost",
     "rep_name",
 ]
@@ -57,8 +61,29 @@ STATE_EXTRA_COLS = [
     "expected_prob_gain",
     "seats_to_majority",
     "hist_cost_to_compete",
+    "state_raised_r_2026",
+    "state_raised_d_2026",
     "abandon_reason",
 ]
+
+
+def attach_cost_to_compete(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Ensure a clear cost_to_be_competitive column for every district row.
+
+    Prefer hist_cost_to_compete (FEC-derived competitive spend proxy).
+    Fall back to incremental_cost if hist missing.
+    """
+    out = df.copy()
+    if "hist_cost_to_compete" in out.columns:
+        base = pd.to_numeric(out["hist_cost_to_compete"], errors="coerce")
+    else:
+        base = pd.Series([pd.NA] * len(out), index=out.index)
+    if "incremental_cost" in out.columns:
+        inc = pd.to_numeric(out["incremental_cost"], errors="coerce")
+        base = base.fillna(inc)
+    out["cost_to_be_competitive"] = base.fillna(0.0)
+    return out
 
 PRESETS: dict[str, dict[str, Any]] = {
     "Balanced (default)": {

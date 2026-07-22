@@ -135,12 +135,18 @@ def build_district_map(
 
         reason = str(row.get("abandon_reason") or "")
         reason_bit = f"<br><i>Abandon: {reason[:160]}</i>" if reason else ""
+        cost_c = row.get("cost_to_be_competitive", row.get("hist_cost_to_compete", row.get("incremental_cost", 0)))
+        try:
+            cost_s = f"${float(cost_c):,.0f}"
+        except (TypeError, ValueError):
+            cost_s = "—"
         tooltip = (
             f"<b>{did}</b><br>"
             f"Party: {party}<br>"
             f"Rep: {row.get('rep_name', '—')}<br>"
             f"PVI: {row.get('pvi', '—')}<br>"
             f"RIVS: {rivs:.2f}<br>"
+            f"<b>Cost to be competitive: {cost_s}</b><br>"
             f"Mode: {mode}<br>"
             f"Rank: {row.get('rivs_rank', '—')}"
             f"{reason_bit}"

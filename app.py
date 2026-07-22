@@ -51,6 +51,7 @@ from src.ui_common import (  # noqa: E402
     FEDERAL_EXTRA_COLS,
     FEDERAL_SLIM_COLS,
     PRESETS,
+    attach_cost_to_compete,
     cached_federal_rivs,
     data_status_badge,
     write_refresh_meta,
@@ -68,7 +69,7 @@ st.set_page_config(
 @st.cache_data(ttl=12 * 3600, show_spinner="Fetching OpenFEC (manual refresh)…")
 def _cached_fec_master(include_outside: bool, cache_bust: int):
     return fetch_and_merge_fec(
-        cycles=[2022, 2024, 2026],
+        cycles=[2026, 2024, 2022],
         include_outside=include_outside,
         progress=False,
         persist=True,
@@ -150,7 +151,7 @@ def _default_scoring() -> dict:
         "rivs_min": 0.0,
         "show_map": False,
         "competitive_only": False,
-        "fec_cycle": "2024",
+        "fec_cycle": "2026",
         "show_extra_cols": False,
         "top_n_table": 100,
     }
@@ -352,8 +353,8 @@ def federal_sidebar(df: pd.DataFrame) -> dict:
         fec_cycle = st.selectbox(
             "FEC cycle (detail)",
             ["2026", "2024", "2022"],
-            index=1,
-            help="Cycle shown on district finance charts.",
+            index=0,
+            help="Cycle shown on district finance charts. Defaults to current cycle (2026).",
         )
         applied = st.form_submit_button("Apply scores", type="primary", use_container_width=True)
 
@@ -449,21 +450,45 @@ def apply_filters(ranked: pd.DataFrame, ctl: dict) -> pd.DataFrame:
     return out
 
 
-def render_detail(row: pd.Series, fec_cycle: str) -> None:
+def _cost_compete(row: pd.Series) -> float:
+    if "cost_to_be_competitive" in row.index and pd.notna(row.get("cost_to_be_competitive")):
+        return float(row["cost_to_be_competitive"])
+    if "hist_cost_to_compete" in row.index and pd.notna(row.get("hist_cost_to_compete")):
+        return float(row["hist_cost_to_compete"])
+    if "incremental_cost" in row.index and pd.notna(row.get("incremental_cost")):
+        return float(row["incremental_cost"])
+    return 0.0
+
+
+def render_detail(row: pd.Series, fec_cycle: str = "2026") -> None:
+    cost_c = _cost_compete(row)
     st.subheader(f"{row['district_id']} — detail")
-    c1, c2, c3, c4 = st.columns(4)
+    st.markdown(
+        f"### Cost to be competitive: **{fmt_money(cost_c)}**"
+    )
+    st.caption(
+        "Historical/FEC-based spend needed to run a competitive race in this district "
+        f"(finance cycle default **{fec_cycle}**)."
+    )
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("RIVS", fmt_num(row["rivs"], decimals=2), help=f"Rank #{fmt_int(row['rivs_rank'])}")
-    c2.metric("PVI (R+)", fmt_pvi(row["pvi"]), help="Lean score, R positive.")
-    c3.metric("R win P₀", fmt_pct(row["baseline_win_prob_r"]), help="Baseline R win probability.")
+    c2.metric(
+        "Cost to compete",
+        fmt_money(cost_c),
+        help="Cost to be competitive — viable race spend proxy from FEC/history.",
+    )
+    c3.metric("PVI (R+)", fmt_pvi(row["pvi"]), help="Lean score, R positive.")
+    c4.metric("R win P₀", fmt_pct(row["baseline_win_prob_r"]), help="Baseline R win probability.")
     mode = str(row["mode"]).lower()
-    c4.metric("Mode", mode.title(), help="attack / defend / abandon / safe")
+    c5.metric("Mode", mode.title(), help="attack / defend / abandon / safe")
     if mode == "abandon":
         st.warning("**Abandon** — redeploy $ to higher-ROI seats.")
         if row.get("abandon_reason"):
             st.caption(str(row["abandon_reason"]))
     st.markdown(
         f"**Rep:** {row.get('rep_name', '—')} ({row.get('rep_party', '—')}) · "
-        f"**Rating:** {row.get('cook_rating', '—')}"
+        f"**Rating:** {row.get('cook_rating', '—')} · "
+        f"**Cost to be competitive:** {fmt_money(cost_c)}"
     )
     d1, d2, d3, d4 = st.columns(4)
     d1.metric("Population", fmt_int(row.get("pop_total")), help="District population.")
@@ -480,9 +505,14 @@ def render_detail(row: pd.Series, fec_cycle: str) -> None:
     b1, b2, b3, b4 = st.columns(4)
     b1.metric("Prob gain", fmt_num(row["expected_prob_gain"], decimals=3))
     b2.metric("Seat priority", fmt_num(row["seat_priority"], decimals=2))
-    b3.metric("Incremental cost", fmt_money(row["incremental_cost"]))
+    b3.metric(
+        "Cost to fund gain",
+        fmt_money(row.get("incremental_cost")),
+        help="Modeled $ to buy the expected probability gain (RIVS denominator).",
+    )
     b4.metric("Long-term factor", fmt_num(row["long_term_factor"], decimals=2))
-    st.plotly_chart(fec_bars(row, cycle=fec_cycle), use_container_width=True)
+    st.markdown(f"##### FEC finance — **{fec_cycle}** cycle (default current year)")
+    st.plotly_chart(fec_bars(row, cycle=fec_cycle or "2026"), use_container_width=True)
 
 
 def render_federal_house_tab() -> None:
@@ -502,8 +532,8 @@ def render_federal_house_tab() -> None:
 
     if fec_stats:
         st.success(
-            f"OpenFEC refreshed · districts with 2024 receipts: "
-            f"{fmt_int(fec_stats.get('districts_with_receipts_2024', 0))}"
+            f"OpenFEC refreshed · districts with 2026 receipts: "
+            f"{fmt_int(fec_stats.get('districts_with_receipts_2026', fec_stats.get('districts_with_receipts_2024', 0)))}"
         )
 
     st.caption(data_status_badge(source_label, raw))
@@ -524,6 +554,7 @@ def render_federal_house_tab() -> None:
         int(ctl["abandon_alt_races"]),
         float(ctl["abandon_alt_gain_ratio"]),
     )
+    ranked = attach_cost_to_compete(ranked)
     filtered = apply_filters(ranked, ctl)
     sim = budget_simulation(
         ranked,
@@ -586,10 +617,22 @@ def render_federal_house_tab() -> None:
                 if len(filtered)
                 else ranked["district_id"].tolist()
             )
-            pick = st.selectbox("District detail", ids, help="Detail panel for one seat.")
+            # Show cost in the dropdown labels
+            id_to_cost = {
+                str(r["district_id"]): fmt_money(_cost_compete(r))
+                for _, r in (filtered if len(filtered) else ranked).iterrows()
+            }
+            pick_labels = [f"{i} · cost to compete {id_to_cost.get(i, '—')}" for i in ids]
+            pick_i = st.selectbox(
+                "District detail",
+                range(len(ids)),
+                format_func=lambda i: pick_labels[i],
+                help="Each option lists cost to be competitive.",
+            )
+            pick = ids[pick_i]
             match = ranked[ranked["district_id"] == pick]
             if len(match):
-                render_detail(match.iloc[0], str(ctl.get("fec_cycle", "2024")))
+                render_detail(match.iloc[0], str(ctl.get("fec_cycle", "2026")))
 
     with tab_map:
         if not ctl.get("show_map"):

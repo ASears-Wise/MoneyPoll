@@ -25,9 +25,9 @@ from src.fec_pipeline import fetch_and_merge_fec  # noqa: E402
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Fetch OpenFEC House finance → master.parquet")
-    ap.add_argument("--cycles", nargs="+", type=int, default=[2022, 2024, 2026])
+    ap.add_argument("--cycles", nargs="+", type=int, default=[2026, 2024, 2022])
     ap.add_argument("--no-outside", action="store_true", help="Skip IE (faster)")
-    ap.add_argument("--outside-cycle", type=int, default=2024)
+    ap.add_argument("--outside-cycle", type=int, default=2026)
     args = ap.parse_args()
 
     if not get_api_key():

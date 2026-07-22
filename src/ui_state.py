@@ -26,6 +26,7 @@ from src.ui_common import (
     PRESETS,
     STATE_EXTRA_COLS,
     STATE_SLIM_COLS,
+    attach_cost_to_compete,
     cached_state_rivs,
     data_status_badge,
     write_refresh_meta,
@@ -95,7 +96,7 @@ def resolve_state_master(
     return raw, label, stats
 
 
-def _state_finance_bars(row: pd.Series, cycle: str = "2024") -> go.Figure:
+def _state_finance_bars(row: pd.Series, cycle: str = "2026") -> go.Figure:
     c = str(cycle)
     labels = ["R Raised", "R Spent", "D Raised", "D Spent"]
     keys = [
@@ -105,6 +106,8 @@ def _state_finance_bars(row: pd.Series, cycle: str = "2024") -> go.Figure:
         f"state_spent_d_{c}",
     ]
     vals = [float(row[k]) if k in row.index and pd.notna(row[k]) else 0.0 for k in keys]
+    if sum(vals) == 0 and c == "2026":
+        return _state_finance_bars(row, cycle="2024")
     colors = ["#e81b23", "#a01218", "#00aef3", "#006b9a"]
     fig = go.Figure(
         data=[
@@ -465,6 +468,7 @@ def render_state_chamber_tab(chamber: Chamber) -> None:
         float(ctl["abandon_alt_gain_ratio"]),
         int(ctl["target_seats"]),
     )
+    ranked = attach_cost_to_compete(ranked)
     # Re-attach true majority for display (target may differ from majority)
     ranked["chamber_majority_threshold"] = maj
     ranked["chamber_target_seats"] = int(ctl["target_seats"])
@@ -542,26 +546,46 @@ def render_state_chamber_tab(chamber: Chamber) -> None:
                 if len(filtered)
                 else ranked["district_id"].tolist()
             )
-            pick = st.selectbox(
+            view_df = filtered if len(filtered) else ranked
+            labels = []
+            for i in ids:
+                rr = view_df[view_df["district_id"] == i]
+                cost_v = (
+                    float(rr.iloc[0]["cost_to_be_competitive"])
+                    if len(rr) and "cost_to_be_competitive" in rr.columns
+                    else 0.0
+                )
+                labels.append(f"{i} · cost to compete {fmt_money(cost_v)}")
+            pick_i = st.selectbox(
                 f"{state} seat detail",
-                ids,
+                range(len(ids)),
+                format_func=lambda i: labels[i],
                 key=f"{prefix}_pick",
-                help="District detail for this state chamber.",
+                help="Each option lists cost to be competitive.",
             )
+            pick = ids[pick_i]
             row = ranked[ranked["district_id"] == pick]
             if len(row):
                 r = row.iloc[0]
+                cost_c = float(r.get("cost_to_be_competitive") or r.get("hist_cost_to_compete") or 0)
                 st.markdown(f"### {r.get('seat_label', r['district_id'])}")
-                m1, m2, m3 = st.columns(3)
+                st.markdown(f"### Cost to be competitive: **{fmt_money(cost_c)}**")
+                m1, m2, m3, m4 = st.columns(4)
                 m1.metric("RIVS", fmt_num(r["rivs"], decimals=2), help="ROI score in this chamber.")
-                m2.metric("Mode", str(r["mode"]).title())
-                m3.metric("Lean", fmt_pvi(r["pvi"]), help="Synthetic lean unless replaced.")
+                m2.metric(
+                    "Cost to compete",
+                    fmt_money(cost_c),
+                    help="Cost to be competitive for a viable race.",
+                )
+                m3.metric("Mode", str(r["mode"]).title())
+                m4.metric("Lean", fmt_pvi(r["pvi"]), help="Synthetic lean unless replaced.")
                 if str(r["mode"]).lower() == "abandon":
                     st.warning("Abandon — redeploy $ within this state.")
                     if r.get("abandon_reason"):
                         st.caption(str(r["abandon_reason"]))
                 st.write(
                     f"**Member:** {r.get('rep_name')} ({r.get('rep_party')}) · "
+                    f"**Cost to be competitive:** {fmt_money(cost_c)} · "
                     f"**Chamber majority:** {fmt_int(maj)} · "
                     f"**R held:** {fmt_int(r_held_now)} · "
                     f"**Short:** {fmt_int(seats_short)}"

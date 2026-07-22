@@ -79,7 +79,8 @@ def merge_finance_into_master(
         ).fillna(0.0)
 
     def _hist(row: pd.Series) -> float:
-        for cy in (2024, 2022, 2026):
+        # Prefer current cycle (2026), then prior cycles
+        for cy in (2026, 2024, 2022):
             r = float(row.get(f"fec_raised_r_{cy}") or 0)
             d = float(row.get(f"fec_raised_d_{cy}") or 0)
             if r + d > 0:
@@ -130,7 +131,7 @@ def fetch_and_merge_fec(
     *,
     cycles: Sequence[int] | None = None,
     include_outside: bool = False,
-    outside_cycle: int = 2024,
+    outside_cycle: int = 2026,
     progress: bool = False,
     persist: bool = True,
 ) -> tuple[pd.DataFrame, str, dict]:
@@ -142,7 +143,7 @@ def fetch_and_merge_fec(
     if not get_api_key():
         raise RuntimeError("FEC_API_KEY not set (env or Streamlit secrets).")
 
-    cycles = list(cycles or [2022, 2024, 2026])
+    cycles = list(cycles or [2026, 2024, 2022])
     finance, outside = build_cycle_frames(
         cycles=cycles,
         fetch_outside=include_outside,

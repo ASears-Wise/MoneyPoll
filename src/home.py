@@ -4,7 +4,13 @@ from __future__ import annotations
 import streamlit as st
 
 from src.formatters import format_display_frame, fmt_int
-from src.ui_common import PRIORITY_STATES, cached_federal_rivs, cached_state_rivs, data_status_badge
+from src.ui_common import (
+    PRIORITY_STATES,
+    attach_cost_to_compete,
+    cached_federal_rivs,
+    cached_state_rivs,
+    data_status_badge,
+)
 
 
 def render_home(
@@ -102,9 +108,26 @@ def render_home(
         help="Priority-state sample for overview speed.",
     )
 
+    fed = attach_cost_to_compete(fed)
+    low = attach_cost_to_compete(low)
+    up = attach_cost_to_compete(up)
+
     st.markdown("##### Top 15 US House by RIVS")
+    st.caption("Cost to be competitive shown for every district (2026-first finance).")
     top = fed.nsmallest(15, "rivs_rank")[
-        [c for c in ("rivs_rank", "district_id", "mode", "rivs", "party_control", "incremental_cost", "rep_name") if c in fed.columns]
+        [
+            c
+            for c in (
+                "rivs_rank",
+                "district_id",
+                "mode",
+                "rivs",
+                "cost_to_be_competitive",
+                "party_control",
+                "rep_name",
+            )
+            if c in fed.columns
+        ]
     ]
     st.dataframe(format_display_frame(top), use_container_width=True, hide_index=True)
 
@@ -118,7 +141,13 @@ def render_home(
                     ab[
                         [
                             c
-                            for c in ("district_id", "mode", "rivs", "incremental_cost", "abandon_reason")
+                            for c in (
+                                "district_id",
+                                "mode",
+                                "rivs",
+                                "cost_to_be_competitive",
+                                "abandon_reason",
+                            )
                             if c in ab.columns
                         ]
                     ]
@@ -136,7 +165,15 @@ def render_home(
                 low.nsmallest(12, "rivs_rank")[
                     [
                         c
-                        for c in ("rivs_rank", "seat_label", "state", "mode", "rivs", "party_control")
+                        for c in (
+                            "rivs_rank",
+                            "seat_label",
+                            "state",
+                            "mode",
+                            "rivs",
+                            "cost_to_be_competitive",
+                            "party_control",
+                        )
                         if c in low.columns
                     ]
                 ]
