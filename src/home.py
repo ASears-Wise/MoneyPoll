@@ -24,7 +24,9 @@ def render_home(
     st.subheader("Overview")
     st.caption(
         "Snapshot-first: the app opens instantly from committed data. "
-        "Use **Refresh** on each tab only when you want a live API pull."
+        "RIVS prioritizes **attacking weak Democrats**, **defending strong/competitive R holds**, "
+        "and **abandoning outrageously expensive** seats. "
+        "Use **Refresh** only for live API pulls."
     )
 
     st.info(

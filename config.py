@@ -33,20 +33,20 @@ TOTAL_HOUSE_SEATS = 435
 
 # RIVS slider defaults & bounds
 RIVS_DEFAULTS = {
-    "cost_sensitivity": 1.0,  # scales incremental cost
-    "long_term_multiplier": 1.15,
+    "cost_sensitivity": 1.15,  # slightly harsher on expensive seats
+    "long_term_multiplier": 1.2,
     "risk_tolerance": 0.52,  # target win probability P*
-    "w_attack": 1.2,
-    "w_defend": 1.0,
+    "w_attack": 1.45,  # clear benefit: attack weak Democrats
+    "w_defend": 1.25,  # clear benefit: defend strong/competitive R holds
     "incumbent_bonus": 0.06,  # additive to baseline R win prob if R incumbent
-    "open_seat_volatility": 0.04,
+    "open_seat_volatility": 0.05,
     "budget_millions": 50.0,
-    # Abandon: high-cost races where $ is better spread across multiple alternatives
+    # Abandon: outrageously expensive races (tighter than before)
     "abandon_enabled": True,
-    "abandon_cost_percentile": 0.82,  # flag competitive seats above this $/gain percentile
-    "abandon_min_cost_m": 6.0,  # $M floor — won't abandon cheap races even if inefficient
-    "abandon_alt_races": 3,  # if this seat's cost ≥ N × median competitive cost…
-    "abandon_alt_gain_ratio": 1.15,  # …and N median seats yield more gain → abandon
+    "abandon_cost_percentile": 0.72,  # top ~28% cost/gain of competitive → abandon
+    "abandon_min_cost_m": 3.5,  # $M floor for abandon
+    "abandon_alt_races": 3,
+    "abandon_alt_gain_ratio": 1.05,
 }
 
 RIVS_BOUNDS = {
