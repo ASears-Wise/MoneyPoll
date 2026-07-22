@@ -55,6 +55,20 @@ def main() -> None:
             f"  outside 2024: {stats.get('districts_with_outside')} districts; "
             f"${stats.get('outside_2024', 0)/1e6:.0f}M"
         )
+    try:
+        from src.ui_common import write_refresh_meta
+        from datetime import datetime, timezone
+
+        write_refresh_meta(
+            {
+                "federal_refreshed_at": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M UTC"
+                ),
+                "federal_source": "openfec",
+            }
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"(meta skip: {e})")
     print("Done.")
 
 

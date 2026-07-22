@@ -41,6 +41,21 @@ Runs **locally on macOS** with **mock data out of the box** (no API keys require
 
 ---
 
+## Performance (A–E)
+
+| Feature | Behavior |
+|---------|----------|
+| **A Snapshot-first** | Committed `data/*.parquet` opens instantly; no auto API pulls |
+| **B Apply scores** | RIVS knobs live in a **form** — recompute only on Apply |
+| **C Home + presets** | Overview tab; presets (Flips only, Protect majority, …) |
+| **D Map opt-in** | Maps off by default; state maps focus one state |
+| **E Nightly Action** | `.github/workflows/refresh-data.yml` refreshes FEC/OpenStates snapshots |
+
+Manual live refresh: sidebar **Refresh FEC now** / **Refresh OpenStates**.  
+Repo secrets for CI: `FEC_API_KEY`, `OPENSTATES_API_KEY`.
+
+---
+
 ## macOS setup
 
 ### 1. Python 3.11+

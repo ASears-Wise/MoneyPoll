@@ -10,13 +10,14 @@ data/cache/*
 !data/cache/.gitkeep
 data/raw/*
 !data/raw/.gitkeep
-data/master.parquet
+# Allow FEC intermediate snapshots for offline rebuilds
+!data/raw/fec_district_finance.parquet
+!data/raw/fec_outside.parquet
+# Committed snapshots for Streamlit Cloud instant open (A)
+# data/master.parquet — tracked on purpose
 data/state/cache/*
 !data/state/cache/.gitkeep
 data/state/raw/*
 !data/state/raw/.gitkeep
-# keep mock + optional committed masters; ignore only if huge live rebuilds preferred:
-# data/state/lower_master.parquet
-# data/state/upper_master.parquet
 *.egg-info/
 .pytest_cache/
