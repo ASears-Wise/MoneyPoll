@@ -13,9 +13,49 @@ from src.map_builder import build_district_map, build_simple_state_centroids_map
 from src.openstates_client import get_api_key as get_openstates_key
 from src.rivs import format_money
 from src.state_data import list_states, load_state_geojson, load_state_master, parse_state_candidates
+from src.state_pipeline import fetch_and_overlay_openstates, master_needs_openstates
 from src.state_rivs import chamber_majority_summary, compute_state_rivs, state_budget_simulation
 
 Chamber = Literal["lower", "upper"]
+
+
+@st.cache_data(
+    ttl=12 * 3600,
+    show_spinner="Fetching OpenStates legislators (all states — may take several minutes)…",
+)
+def _cached_openstates_master(chamber: str, cache_bust: int) -> tuple[pd.DataFrame, str, dict]:
+    return fetch_and_overlay_openstates(
+        chamber,  # type: ignore[arg-type]
+        states=None,
+        progress=False,
+        persist=True,
+    )
+
+
+def resolve_state_master(
+    chamber: Chamber,
+    *,
+    force_refresh: bool = False,
+    auto_fetch: bool = True,
+) -> tuple[pd.DataFrame, str, dict | None]:
+    """Disk/mock master, with OpenStates overlay when API key is set."""
+    bust_key = f"os_cache_bust_{chamber}"
+    if bust_key not in st.session_state:
+        st.session_state[bust_key] = 0
+    if force_refresh:
+        st.session_state[bust_key] += 1
+        _cached_openstates_master.clear()
+
+    key_ok = get_openstates_key() is not None
+    raw, label = load_state_master(chamber)
+    stats = None
+
+    if key_ok and (force_refresh or (auto_fetch and master_needs_openstates(raw, label))):
+        try:
+            raw, label, stats = _cached_openstates_master(chamber, st.session_state[bust_key])
+        except Exception as e:  # noqa: BLE001
+            st.warning(f"OpenStates refresh failed — using `{label}`. ({e})")
+    return raw, label, stats
 
 
 def _state_finance_bars(row: pd.Series, cycle: str = "2024") -> go.Figure:
@@ -135,18 +175,47 @@ def render_state_chamber_tab(chamber: Chamber) -> None:
     if chamber == "upper":
         st.info("Nebraska is unicameral — no upper-chamber seats in this tab.")
 
+    prefix = "L" if chamber == "lower" else "U"
+    os_key = get_openstates_key() is not None
+
+    with st.sidebar.expander(f"OpenStates ({prefix})", expanded=os_key):
+        st.write("API key:", "✅ set" if os_key else "⚪ not set")
+        st.caption(
+            'Streamlit Secrets TOML: `OPENSTATES_API_KEY = "…"` '
+            "(exact name). Auto-overlays members when data is still mock-only."
+        )
+        force_os = st.button(
+            f"Refresh OpenStates ({prefix})",
+            type="primary",
+            disabled=not os_key,
+            key=f"{prefix}_os_refresh",
+            help="Re-pull legislators for all states in this chamber (cached 12h).",
+        )
+        if not os_key:
+            st.caption("Add key under App settings → Secrets, then reboot the app.")
+
     try:
-        raw, source_label = load_state_master(chamber)
+        raw, source_label, os_stats = resolve_state_master(
+            chamber,
+            force_refresh=bool(force_os) if os_key else False,
+            auto_fetch=True,
+        )
     except Exception as e:
         st.error(f"Could not load state master: {e}")
         st.info("Run: `python scripts/generate_state_mock_data.py`")
         return
 
+    if os_stats:
+        st.success(
+            f"OpenStates · {os_stats.get('seats_matched', 0)}/"
+            f"{os_stats.get('total_seats', 0)} seats matched · "
+            f"{os_stats.get('states_requested', 0)} states"
+        )
+
     if raw.empty:
         st.warning("No seats in this chamber master.")
         return
 
-    prefix = "L" if chamber == "lower" else "U"
     states = list_states(raw)
 
     c1, c2, c3 = st.columns([2, 1, 1])
@@ -175,10 +244,9 @@ def render_state_chamber_tab(chamber: Chamber) -> None:
 
     knobs = _rivs_knobs(prefix)
 
-    os_key = get_openstates_key() is not None
     st.caption(
         f"Data: `{source_label}` · OpenStates key: "
-        f"{'✅ set' if os_key else '⚪ not set (mock/members from parquet)'}"
+        f"{'✅ set' if os_key else '⚪ not set (mock members)'}"
     )
 
     ranked = compute_state_rivs(

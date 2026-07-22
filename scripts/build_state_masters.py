@@ -19,45 +19,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from config import STATE_DATA_DIR, STATE_LOWER_PARQUET, STATE_UPPER_PARQUET  # noqa: E402
-from src.openstates_client import (  # noqa: E402
-    get_api_key,
-    list_people,
-    people_to_overlay_rows,
-)
+from src.openstates_client import get_api_key  # noqa: E402
 from src.state_data import load_state_master  # noqa: E402
-
-
-def apply_overlay(base: pd.DataFrame, overlay: pd.DataFrame) -> pd.DataFrame:
-    if overlay.empty:
-        return base
-    out = base.copy()
-    o = overlay.drop_duplicates("district_id").set_index("district_id")
-    for col in ("rep_name", "rep_party", "party_control"):
-        if col not in o.columns:
-            continue
-        mapped = out["district_id"].map(o[col])
-        out[col] = mapped.combine_first(out[col])
-    out["data_source_flags"] = out["data_source_flags"].astype(str).apply(
-        lambda s: s if "openstates" in s else f"{s}|openstates".strip("|")
-    )
-    return out
-
-
-def fetch_openstates_for_states(states: list[str], chamber: str) -> pd.DataFrame:
-    rows = []
-    for st in states:
-        print(f"  OpenStates {st} {chamber}…")
-        try:
-            people = list_people(st.lower(), org_classification=chamber if chamber != "lower" else None)
-            # For lower, also try without filter then filter client-side if empty
-            if not people and chamber == "lower":
-                people = list_people(st.lower())
-            part = people_to_overlay_rows(people, chamber)
-            print(f"    {len(part)} mapped seats")
-            rows.extend(part)
-        except Exception as e:  # noqa: BLE001
-            print(f"    failed: {e}")
-    return pd.DataFrame(rows) if rows else pd.DataFrame()
+from src.state_pipeline import fetch_and_overlay_openstates  # noqa: E402
 
 
 def main() -> None:
@@ -68,24 +32,27 @@ def main() -> None:
     args = ap.parse_args()
 
     if args.from_mock:
-        from scripts.generate_state_mock_data import main as gen
+        from generate_state_mock_data import main as gen
 
         gen()
-
-    lower, _ = load_state_master("lower")
-    upper, _ = load_state_master("upper")
 
     if args.openstates:
         if not get_api_key():
             raise SystemExit("OPENSTATES_API_KEY required for --openstates")
-        states = args.states or sorted(lower["state"].unique().tolist())
         print("Fetching OpenStates lower…")
-        lo = fetch_openstates_for_states(states, "lower")
+        lower, lab_l, st_l = fetch_and_overlay_openstates(
+            "lower", states=args.states, progress=True, persist=True
+        )
+        print(lab_l, st_l)
         print("Fetching OpenStates upper…")
-        uo = fetch_openstates_for_states(states, "upper")
-        lower = apply_overlay(lower, lo)
-        upper = apply_overlay(upper, uo)
+        upper, lab_u, st_u = fetch_and_overlay_openstates(
+            "upper", states=args.states, progress=True, persist=True
+        )
+        print(lab_u, st_u)
+        return
 
+    lower, _ = load_state_master("lower")
+    upper, _ = load_state_master("upper")
     STATE_DATA_DIR.mkdir(parents=True, exist_ok=True)
     lower.to_parquet(STATE_LOWER_PARQUET, index=False)
     upper.to_parquet(STATE_UPPER_PARQUET, index=False)

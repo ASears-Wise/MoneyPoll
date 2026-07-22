@@ -94,13 +94,15 @@ python scripts/generate_state_mock_data.py
 python scripts/build_state_masters.py --openstates --states AZ GA MI PA
 ```
 
-Streamlit secrets:
+Streamlit secrets (exact TOML name recommended):
 
 ```toml
 OPENSTATES_API_KEY = "your-key"
 ```
 
-State lean/finance are **synthetic proxies** by default (not Cook / not OpenFEC). Optional GeoJSON: `data/state/raw/{ST}_lower.geojson` or `sldl.geojson` / `sldu.geojson`.
+With the key set, **State House / State Senate** tabs auto-overlay live legislators when data is still mock-only (12h cache). Use **Refresh OpenStates** in the sidebar expander for that chamber to force a new pull (all 50 states — can take several minutes on first run).
+
+State lean/finance remain **synthetic proxies** by default (not Cook / not OpenFEC). Optional GeoJSON: `data/state/raw/{ST}_lower.geojson` or `sldl.geojson` / `sldu.geojson`.
 
 **OpenFEC pull (historical + ongoing House cycles):**
 

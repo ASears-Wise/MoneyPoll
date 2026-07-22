@@ -26,17 +26,40 @@ _last = 0.0
 
 
 def get_api_key() -> str | None:
-    key = os.getenv("OPENSTATES_API_KEY", "").strip()
-    if key:
-        return key
+    """Resolve OpenStates key from env, then Streamlit secrets."""
+    for env_name in ("OPENSTATES_API_KEY", "OPEN_STATES_API_KEY"):
+        key = os.getenv(env_name, "").strip()
+        if key:
+            return key
     try:
         import streamlit as st
 
-        for name in ("OPENSTATES_API_KEY", "openstates_api_key"):
-            if name in st.secrets:
-                val = str(st.secrets[name]).strip()
-                if val:
-                    return val
+        # Common secret key spellings users might enter in the Cloud UI
+        for name in (
+            "OPENSTATES_API_KEY",
+            "openstates_api_key",
+            "OPEN_STATES_API_KEY",
+            "OpenStates",
+            "openstates",
+        ):
+            try:
+                if name in st.secrets:
+                    val = str(st.secrets[name]).strip()
+                    if val:
+                        return val
+            except Exception:
+                continue
+        # Nested block: [openstates] api_key = "..."
+        try:
+            block = st.secrets.get("openstates")
+            if block is not None:
+                for k in ("api_key", "API_KEY", "key"):
+                    if k in block:
+                        val = str(block[k]).strip()
+                        if val:
+                            return val
+        except Exception:
+            pass
     except Exception:
         pass
     return None
@@ -136,20 +159,37 @@ def party_to_code(party: str | None) -> str:
     return "O"
 
 
+def _role_matches_chamber(org: str, chamber: str) -> bool:
+    org = (org or "").lower()
+    if chamber == "upper":
+        return org in ("upper", "senate", "")
+    # lower + unicameral
+    return org in ("lower", "legislature", "house", "assembly", "")
+
+
 def people_to_overlay_rows(people: list[dict[str, Any]], chamber: str) -> list[dict[str, Any]]:
     """Map OpenStates people records to district overlay fields."""
     rows = []
     for p in people:
         current = p.get("current_role") or {}
-        # roles list fallback
         roles = p.get("roles") or []
-        role = current if current else (roles[0] if roles else {})
-        org = (role.get("org_classification") or role.get("type") or "").lower()
-        if chamber == "lower" and org and org not in ("lower", "legislature"):
-            # NE unicameral often "legislature"
-            if chamber == "lower" and org not in ("lower", "legislature", ""):
+        candidates_roles = [current] if current else []
+        candidates_roles.extend(roles if isinstance(roles, list) else [])
+
+        role = {}
+        for r in candidates_roles:
+            if not isinstance(r, dict):
                 continue
-        if chamber == "upper" and org and org != "upper":
+            org = (r.get("org_classification") or r.get("type") or "").lower()
+            if _role_matches_chamber(org, chamber) or not org:
+                role = r
+                if org:  # prefer explicit chamber match
+                    break
+        if not role and candidates_roles:
+            role = candidates_roles[0] if isinstance(candidates_roles[0], dict) else {}
+
+        org = (role.get("org_classification") or role.get("type") or "").lower()
+        if org and not _role_matches_chamber(org, chamber):
             continue
 
         dist = role.get("district")
@@ -158,32 +198,38 @@ def people_to_overlay_rows(people: list[dict[str, Any]], chamber: str) -> list[d
         try:
             num = int(str(dist).split("-")[-1].strip())
         except ValueError:
-            # keep string digits
             digits = "".join(c for c in str(dist) if c.isdigit())
             if not digits:
                 continue
             num = int(digits)
 
-        # state from jurisdiction
-        juris = (p.get("jurisdiction") or {}).get("id") or role.get("jurisdiction") or ""
+        juris = ""
+        if isinstance(p.get("jurisdiction"), dict):
+            juris = p["jurisdiction"].get("id") or ""
+        juris = juris or role.get("jurisdiction") or ""
         st = ""
         if "state:" in str(juris):
             st = str(juris).split("state:")[1].split("/")[0].upper()
-        if not st and p.get("jurisdiction"):
-            st = str(p["jurisdiction"].get("name", ""))[:2].upper()
+        if len(st) != 2 and isinstance(p.get("jurisdiction"), dict):
+            # sometimes classification has name only
+            name_j = str(p["jurisdiction"].get("name", ""))
+            # leave blank if unknown
+            st = st or ""
 
         party = ""
-        parties = p.get("party") or []
+        parties = p.get("party") or p.get("party_name") or []
         if isinstance(parties, list) and parties:
-            party = party_to_code(parties[0].get("name") if isinstance(parties[0], dict) else parties[0])
+            party = party_to_code(
+                parties[0].get("name") if isinstance(parties[0], dict) else parties[0]
+            )
         elif isinstance(parties, str):
             party = party_to_code(parties)
 
         name = p.get("name") or f"{p.get('given_name', '')} {p.get('family_name', '')}".strip()
-        tag = "L" if chamber == "lower" else "U"
-        did = f"{st}-{tag}-{num:03d}" if st else None
-        if not did:
+        if not st:
             continue
+        tag = "L" if chamber == "lower" else "U"
+        did = f"{st}-{tag}-{num:03d}"
         rows.append(
             {
                 "district_id": did,
