@@ -1,6 +1,6 @@
 # House Moneyball ⚾
 
-Interactive **Streamlit** dashboard that ranks all **435 U.S. House districts** by a tunable **Republican Investment Value Score (RIVS)** — highlighting high-ROI *attack* (flips) and *defend* (holds) opportunities toward a comfortable **230-seat** Republican majority.
+Interactive **Streamlit** dashboard that ranks all **435 U.S. House districts** by a tunable **Republican Investment Value Score (RIVS)** — highlighting high-ROI *attack* (flips) and *defend* (holds) opportunities, plus **abandon** races where concentrating spend is untenable versus spreading capital across multiple cheaper seats — toward a comfortable **230-seat** Republican majority.
 
 Runs **locally on macOS** with **mock data out of the box** (no API keys required). Optional Google Civic Information API integration for election/contest data.
 
@@ -27,10 +27,11 @@ Runs **locally on macOS** with **mock data out of the box** (no API keys require
 | Baseline \(P_0\) | Logistic of PVI + incumbent / open-seat adjustments |
 | Expected gain | Distance toward target win probability \(P^*\) (risk tolerance) |
 | Seat priority | Marginal seats × path to target majority × attack/defend weights |
-| Incremental cost | Historical competitive FEC proxy × difficulty × cost sensitivity |
+| Incremental cost | Historical competitive FEC proxy (+ outside) × difficulty × cost sensitivity |
 | Long-term | Bonus for open seats / infrastructure |
+| **Abandon** | Competitive but capital-intensive: high $/ΔP **or** opportunity cost vs N median races — redeploy |
 
-**Budget sim:** greedily fund top RIVS districts until \$X is spent; report expected R seats ≈ \(\sum P_0 + \sum \Delta P\).
+**Budget sim:** greedily fund top RIVS districts until \$X is spent (skips abandon by default); report expected R seats ≈ \(\sum P_0 + \sum \Delta P\).
 
 ---
 
@@ -69,6 +70,13 @@ cp .env.example .env
 |----------|---------|
 | `FEC_API_KEY` | [OpenFEC](https://api.open.fec.gov/developers/) / [api.data.gov](https://api.data.gov/signup/) key for candidate receipts, disbursements, and IE |
 | `GOOGLE_CIVIC_API_KEY` | Optional — elections / voterInfo only |
+
+**Streamlit Community Cloud:** put the same keys under **App settings → Secrets** (TOML). The app reads `st.secrets` as well as env vars:
+
+```toml
+FEC_API_KEY = "your-key"
+# GOOGLE_CIVIC_API_KEY = "optional"
+```
 
 **OpenFEC pull (historical + ongoing House cycles):**
 
@@ -140,7 +148,7 @@ One row per district (`district_id` like `PA-08`, at-large `AK-00`).
 | `district_id`, `state`, `district_num`, `geoid` | Identifiers |
 | `party_control`, `rep_name`, `rep_party`, `first_elected`, `tenure_years` | Member |
 | `pvi`, `cook_rating` | Lean (signed PVI: R positive) |
-| `incumbent_running`, `is_open_seat`, `mode` | Race context (`attack`/`defend`/`safe`) |
+| `incumbent_running`, `is_open_seat`, `mode` | Race context (`attack`/`defend`/`abandon`/`safe`) |
 | `fec_*_{2022,2024,2026}` | Raised/spent by side; `fec_outside_2024` |
 | `hist_cost_to_compete` | Competitive spend proxy for RIVS cost |
 | `pop_total`, `vap`, `median_income`, `pct_*`, `pct_ba_plus`, `pct_urban` | Demographics |

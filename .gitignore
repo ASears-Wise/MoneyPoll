@@ -5,6 +5,7 @@ __pycache__/
 .env
 .DS_Store
 .streamlit/secrets.toml
+# allow config.toml; never commit secrets
 data/cache/*
 !data/cache/.gitkeep
 data/raw/*

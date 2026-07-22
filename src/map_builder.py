@@ -73,7 +73,8 @@ def build_district_map(
     fg_all = folium.FeatureGroup(name="All (filtered)", show=True)
     fg_r = folium.FeatureGroup(name="R-held", show=False)
     fg_d = folium.FeatureGroup(name="D-held", show=False)
-    fg_comp = folium.FeatureGroup(name="Competitive (mode ≠ safe)", show=False)
+    fg_comp = folium.FeatureGroup(name="Competitive (attack/defend)", show=False)
+    fg_abandon = folium.FeatureGroup(name="Abandon (high cost)", show=False)
 
     features = geojson.get("features") or []
     for feat in features:
@@ -122,12 +123,18 @@ def build_district_map(
             continue
         if not show_d and party == "D":
             continue
-        if show_competitive_only and mode == "safe":
+        if show_competitive_only and mode not in ("attack", "defend"):
             continue
 
         weight = 2.5 if selected and did == selected else 0.6
         fill_op = 0.75 if not selected or did == selected else 0.35
+        # Amber outline for abandon
+        edge = "#b45309" if mode == "abandon" else ("#222222" if selected == did else "#444444")
+        if mode == "abandon":
+            weight = max(weight, 1.4)
 
+        reason = str(row.get("abandon_reason") or "")
+        reason_bit = f"<br><i>Abandon: {reason[:160]}</i>" if reason else ""
         tooltip = (
             f"<b>{did}</b><br>"
             f"Party: {party}<br>"
@@ -136,13 +143,15 @@ def build_district_map(
             f"RIVS: {rivs:.2f}<br>"
             f"Mode: {mode}<br>"
             f"Rank: {row.get('rivs_rank', '—')}"
+            f"{reason_bit}"
         )
 
         style = {
             "fillColor": color,
-            "color": "#222222" if selected == did else "#444444",
+            "color": edge,
             "weight": weight,
             "fillOpacity": fill_op,
+            "dashArray": "4 3" if mode == "abandon" else None,
         }
 
         gj = folium.GeoJson(
@@ -163,17 +172,24 @@ def build_district_map(
                 style_function=lambda x, s=style: s,
                 tooltip=folium.Tooltip(tooltip),
             ).add_to(fg_d)
-        if mode != "safe":
+        if mode in ("attack", "defend"):
             folium.GeoJson(
                 feat,
                 style_function=lambda x, s=style: s,
                 tooltip=folium.Tooltip(tooltip),
             ).add_to(fg_comp)
+        if mode == "abandon":
+            folium.GeoJson(
+                feat,
+                style_function=lambda x, s=style: s,
+                tooltip=folium.Tooltip(tooltip),
+            ).add_to(fg_abandon)
 
     fg_all.add_to(m)
     fg_r.add_to(m)
     fg_d.add_to(m)
     fg_comp.add_to(m)
+    fg_abandon.add_to(m)
     folium.LayerControl(collapsed=False).add_to(m)
     return m
 

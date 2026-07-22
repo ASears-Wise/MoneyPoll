@@ -64,11 +64,20 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
     )
     modes = st.sidebar.multiselect(
         "Mode",
-        ["attack", "defend", "safe"],
-        default=["attack", "defend", "safe"],
+        ["attack", "defend", "abandon", "safe"],
+        default=["attack", "defend", "abandon", "safe"],
+        help=(
+            "attack = flip targets · defend = protect holds · "
+            "abandon = competitive but capital is better spent across many races · "
+            "safe = deep seats"
+        ),
     )
     rivs_min = st.sidebar.slider("Min RIVS (after compute)", 0.0, 50.0, 0.0, 0.5)
-    competitive_only = st.sidebar.checkbox("Map: competitive only (mode ≠ safe)", False)
+    competitive_only = st.sidebar.checkbox(
+        "Map: competitive only (attack/defend)",
+        False,
+        help="Hides safe and abandon on the map layer filter",
+    )
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("RIVS parameters")
@@ -79,8 +88,9 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
 
 - **Expected Prob Gain**: how much R win probability you can buy toward the risk threshold  
 - **Seat Priority**: marginal seats + path to majority + attack/defend weights  
-- **Incremental Cost**: FEC-based cost to compete, scaled by difficulty  
+- **Incremental Cost**: FEC-based cost to compete (+ outside spend), scaled by difficulty  
 - **Long-term factor**: open seats / infrastructure bonus  
+- **Abandon**: competitive seats where $ is better split across multiple cheaper races  
             """
         )
 
@@ -138,6 +148,50 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         d["open_seat_volatility"],
         0.01,
     )
+
+    st.sidebar.markdown("##### Abandon (don't double-down)")
+    abandon_enabled = st.sidebar.checkbox(
+        "Enable abandon mode",
+        value=bool(d["abandon_enabled"]),
+        help="Flag races where concentrating spend is untenable vs spreading $",
+    )
+    abandon_pct = st.sidebar.slider(
+        "Abandon cost/gain percentile",
+        b["abandon_cost_percentile"][0],
+        b["abandon_cost_percentile"][1],
+        d["abandon_cost_percentile"],
+        0.01,
+        help="Competitive seats above this $/ΔP percentile become abandon (if also ≥ min cost)",
+        disabled=not abandon_enabled,
+    )
+    abandon_min_m = st.sidebar.slider(
+        "Abandon min cost ($M)",
+        b["abandon_min_cost_m"][0],
+        b["abandon_min_cost_m"][1],
+        d["abandon_min_cost_m"],
+        0.5,
+        help="Never abandon races cheaper than this absolute floor",
+        disabled=not abandon_enabled,
+    )
+    abandon_alts = st.sidebar.slider(
+        "Opportunity: alt races (N)",
+        b["abandon_alt_races"][0],
+        b["abandon_alt_races"][1],
+        int(d["abandon_alt_races"]),
+        1,
+        help="If this seat costs ≥ N × median competitive race, compare gains",
+        disabled=not abandon_enabled,
+    )
+    abandon_gain_ratio = st.sidebar.slider(
+        "Opportunity: gain ratio",
+        b["abandon_alt_gain_ratio"][0],
+        b["abandon_alt_gain_ratio"][1],
+        d["abandon_alt_gain_ratio"],
+        0.05,
+        help="Abandon if N median races yield more than this seat × ratio",
+        disabled=not abandon_enabled,
+    )
+
     target_seats = st.sidebar.number_input(
         "Target R seats",
         min_value=218,
@@ -151,6 +205,11 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         b["budget_millions"][1],
         d["budget_millions"],
         1.0,
+    )
+    skip_abandon_budget = st.sidebar.checkbox(
+        "Budget sim: skip abandon seats",
+        value=True,
+        help="Do not allocate simulated dollars into abandon races",
     )
     fec_cycle = st.sidebar.selectbox("FEC cycle (detail charts)", ["2026", "2024", "2022"], index=1)
 
@@ -191,6 +250,12 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         "target_seats": int(target_seats),
         "budget_m": budget_m,
         "fec_cycle": fec_cycle,
+        "abandon_enabled": abandon_enabled,
+        "abandon_cost_percentile": abandon_pct,
+        "abandon_min_cost_m": abandon_min_m,
+        "abandon_alt_races": abandon_alts,
+        "abandon_alt_gain_ratio": abandon_gain_ratio,
+        "skip_abandon_budget": skip_abandon_budget,
     }
 
 
@@ -212,7 +277,20 @@ def render_detail(row: pd.Series, fec_cycle: str) -> None:
     c1.metric("RIVS", f"{float(row['rivs']):.2f}", help=f"Rank #{int(row['rivs_rank'])}")
     c2.metric("PVI (R+)", f"{float(row['pvi']):+.1f}")
     c3.metric("R win P₀", f"{float(row['baseline_win_prob_r']):.1%}")
-    c4.metric("Mode", str(row["mode"]).title())
+    mode = str(row["mode"]).lower()
+    c4.metric("Mode", mode.title())
+
+    if mode == "abandon":
+        st.warning(
+            "**Abandon** — concentrating more money here is likely untenable. "
+            "Redeploy toward multiple higher-RIVS attack/defend seats instead."
+        )
+        reason = row.get("abandon_reason") or ""
+        if reason:
+            st.caption(f"Why: {reason}")
+        base = row.get("base_mode")
+        if base and str(base) != mode:
+            st.caption(f"Underlying strategic type before abandon: **{base}**")
 
     st.markdown(
         f"**Representative:** {row.get('rep_name', '—')} "
@@ -283,14 +361,26 @@ def main() -> None:
         incumbent_bonus=ctl["inc_bonus"],
         open_seat_volatility=ctl["open_vol"],
         target_seats=ctl["target_seats"],
+        abandon_enabled=ctl["abandon_enabled"],
+        abandon_cost_percentile=ctl["abandon_cost_percentile"],
+        abandon_min_cost_m=ctl["abandon_min_cost_m"],
+        abandon_alt_races=ctl["abandon_alt_races"],
+        abandon_alt_gain_ratio=ctl["abandon_alt_gain_ratio"],
     )
     filtered = apply_filters(ranked, ctl)
-    sim = budget_simulation(ranked, ctl["budget_m"] * 1_000_000)
+    sim = budget_simulation(
+        ranked,
+        ctl["budget_m"] * 1_000_000,
+        skip_abandon=ctl["skip_abandon_budget"],
+    )
 
     # KPIs
     r_held = int((ranked["party_control"] == "R").sum())
+    n_abandon = int((ranked["mode"] == "abandon").sum())
+    n_attack = int((ranked["mode"] == "attack").sum())
+    n_defend = int((ranked["mode"] == "defend").sum())
     baseline_seats = sim["baseline_expected_r_seats"]
-    k1, k2, k3, k4, k5 = st.columns(5)
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
     k1.metric("R-held (control)", r_held)
     k2.metric("Expected R seats (P₀ sum)", f"{baseline_seats:.1f}")
     k3.metric(
@@ -298,13 +388,20 @@ def main() -> None:
         f"{sim['expected_r_seats_after']:.1f}",
         delta=f"+{sim['total_prob_gain']:.2f} seats",
     )
-    k4.metric("Target majority", ctl["target_seats"])
-    k5.metric("Districts shown", len(filtered))
+    k4.metric("Attack / Defend", f"{n_attack} / {n_defend}")
+    k5.metric("Abandon", n_abandon, help="High-cost races — redeploy $ elsewhere")
+    k6.metric("Districts shown", len(filtered))
 
     st.caption(
         f"Data: `{source_label}` · "
         f"Budget sim funds **{sim['n_districts_funded']}** districts "
-        f"({format_money(sim['spent_usd'])} spent). "
+        f"({format_money(sim['spent_usd'])} spent"
+        + (
+            f", skipped {sim.get('skipped_abandon', 0)} abandon"
+            if ctl["skip_abandon_budget"]
+            else ""
+        )
+        + "). "
         f"GeoJSON: {'loaded' if geo else 'missing — using state centroids fallback'}."
     )
 
@@ -385,16 +482,19 @@ def main() -> None:
             "state",
             "party_control",
             "mode",
+            "base_mode",
             "rivs",
             "pvi",
             "cook_rating",
             "baseline_win_prob_r",
             "expected_prob_gain",
             "incremental_cost",
+            "cost_per_gain",
             "seat_priority",
             "rep_name",
             "is_open_seat",
             "hist_cost_to_compete",
+            "abandon_reason",
             "median_income",
             "pop_total",
         ]
@@ -439,11 +539,12 @@ $$
 |-----------|----------------|
 | Baseline win prob \(P_0\) | Logistic of PVI + incumbent bonus/penalty + open-seat blend |
 | Expected gain | Attack: \(\\max(0, P^*-P_0)\); Defend: fortify toward buffer / \(P^*\) |
-| Seat priority | Marginality × path-to-target majority × attack/defend weights |
-| Incremental cost | Historical competitive FEC proxy × difficulty × cost sensitivity |
+| Seat priority | Marginality × path-to-target majority × attack/defend weights (abandon ≈ 0) |
+| Incremental cost | FEC competitive proxy + 25% of 2024 outside spend × difficulty |
 | Long-term | Multiplier for open seats / fragile opposition |
+| **Abandon** | Competitive seats with extreme $/ΔP **or** opportunity cost vs N median races — redeploy, do not double-down |
 
-**Budget simulation:** Greedy fill from highest RIVS until budget exhausted; expected seats ≈ \(\\sum P_0 + \\sum \\Delta P_{\\mathrm{funded}}\).
+**Budget simulation:** Greedy fill from highest RIVS until budget exhausted (skips abandon/safe by default); expected seats ≈ \(\\sum P_0 + \\sum \\Delta P_{\\mathrm{funded}}\).
 
 ### Data sources
 

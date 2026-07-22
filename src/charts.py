@@ -74,7 +74,12 @@ def top_rivs_bar(df: pd.DataFrame, n: int = 15) -> go.Figure:
         color="mode",
         orientation="h",
         title=f"Top {n} districts by RIVS",
-        color_discrete_map={"attack": "#e81b23", "defend": "#3c3b6e", "safe": "#888888"},
+        color_discrete_map={
+            "attack": "#e81b23",
+            "defend": "#3c3b6e",
+            "safe": "#888888",
+            "abandon": "#f59e0b",  # amber — do not double-down
+        },
     )
     fig.update_layout(height=420, margin=dict(l=60, r=20, t=50, b=40), template="plotly_white")
     return fig

@@ -12,7 +12,7 @@
 See plan / README. Key fields:
 
 - `district_id` — e.g. `TX-07`, at-large `WY-00`
-- `party_control`, `rep_name`, `pvi`, `mode` (`attack`/`defend`/`safe`)
+- `party_control`, `rep_name`, `pvi`, `mode` (`attack`/`defend`/`abandon`/`safe`)
 - FEC columns: `fec_raised_r_2024`, `fec_spent_d_2022`, …
 - ACS-style demographics: `pop_total`, `vap`, `pct_*`, `median_income`
 - `civic_candidates_json` — JSON blob of contest candidates

@@ -24,9 +24,9 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
-from config import CACHE_DIR, CIVIC_BASE, CIVIC_CACHE_TTL_HOURS
+from config import CACHE_DIR, CIVIC_BASE, CIVIC_CACHE_TTL_HOURS, ROOT
 
-load_dotenv()
+load_dotenv(ROOT / ".env")
 
 # Conservative client-side pacing
 _MIN_INTERVAL_SEC = 0.15
@@ -34,8 +34,21 @@ _last_call = 0.0
 
 
 def get_api_key() -> str | None:
+    """Resolve Civic key from env, then Streamlit secrets (Cloud)."""
     key = os.getenv("GOOGLE_CIVIC_API_KEY", "").strip()
-    return key or None
+    if key:
+        return key
+    try:
+        import streamlit as st
+
+        for name in ("GOOGLE_CIVIC_API_KEY", "google_civic_api_key"):
+            if name in st.secrets:
+                val = str(st.secrets[name]).strip()
+                if val:
+                    return val
+    except Exception:
+        pass
+    return None
 
 
 def _cache_path(key: str) -> Path:

@@ -42,8 +42,22 @@ _PARTY_SIDE = {
 
 
 def get_api_key() -> str | None:
+    """Resolve FEC key from env, then Streamlit secrets (Cloud)."""
     key = os.getenv("FEC_API_KEY", "").strip()
-    return key or None
+    if key:
+        return key
+    # Streamlit Community Cloud: Settings → Secrets
+    try:
+        import streamlit as st
+
+        for name in ("FEC_API_KEY", "fec_api_key", "OPENFEC_API_KEY"):
+            if name in st.secrets:
+                val = str(st.secrets[name]).strip()
+                if val:
+                    return val
+    except Exception:
+        pass
+    return None
 
 
 def _cache_path(key: str) -> Path:

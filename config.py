@@ -27,6 +27,12 @@ RIVS_DEFAULTS = {
     "incumbent_bonus": 0.06,  # additive to baseline R win prob if R incumbent
     "open_seat_volatility": 0.04,
     "budget_millions": 50.0,
+    # Abandon: high-cost races where $ is better spread across multiple alternatives
+    "abandon_enabled": True,
+    "abandon_cost_percentile": 0.82,  # flag competitive seats above this $/gain percentile
+    "abandon_min_cost_m": 6.0,  # $M floor — won't abandon cheap races even if inefficient
+    "abandon_alt_races": 3,  # if this seat's cost ≥ N × median competitive cost…
+    "abandon_alt_gain_ratio": 1.15,  # …and N median seats yield more gain → abandon
 }
 
 RIVS_BOUNDS = {
@@ -38,6 +44,10 @@ RIVS_BOUNDS = {
     "incumbent_bonus": (0.0, 0.15),
     "open_seat_volatility": (0.0, 0.12),
     "budget_millions": (1.0, 500.0),
+    "abandon_cost_percentile": (0.60, 0.98),
+    "abandon_min_cost_m": (1.0, 25.0),
+    "abandon_alt_races": (2, 8),
+    "abandon_alt_gain_ratio": (1.0, 2.5),
 }
 
 # Civic API
