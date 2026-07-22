@@ -11,5 +11,12 @@ data/cache/*
 data/raw/*
 !data/raw/.gitkeep
 data/master.parquet
+data/state/cache/*
+!data/state/cache/.gitkeep
+data/state/raw/*
+!data/state/raw/.gitkeep
+# keep mock + optional committed masters; ignore only if huge live rebuilds preferred:
+# data/state/lower_master.parquet
+# data/state/upper_master.parquet
 *.egg-info/
 .pytest_cache/

@@ -1,6 +1,12 @@
 # House Moneyball ⚾
 
-Interactive **Streamlit** dashboard that ranks all **435 U.S. House districts** by a tunable **Republican Investment Value Score (RIVS)** — highlighting high-ROI *attack* (flips) and *defend* (holds) opportunities, plus **abandon** races where concentrating spend is untenable versus spreading capital across multiple cheaper seats — toward a comfortable **230-seat** Republican majority.
+Interactive **Streamlit** dashboard that ranks:
+
+1. **US House** (435) — path to a **230-seat** Republican majority  
+2. **State House** (lower chambers, all 50 states) — path to **each chamber’s majority**  
+3. **State Senate** (upper chambers; NE unicameral excluded) — same moneyball frame  
+
+Tunable **Republican Investment Value Score (RIVS)** with *attack* / *defend* / *abandon* / *safe* modes.
 
 Runs **locally on macOS** with **mock data out of the box** (no API keys required). Optional Google Civic Information API integration for election/contest data.
 
@@ -79,6 +85,22 @@ FEC_API_KEY = "your-key"
 ```
 
 With `FEC_API_KEY` set, the app **auto-fetches** OpenFEC House candidate totals (2022/2024/2026) on first load if data is still mock-only. Results are **cached for 12 hours** (and written to `data/master.parquet` when the filesystem allows). Use the sidebar **Refresh FEC data now** button to force a new pull. Optional **Include 2024 outside spending (IE)** is slower (all 435 districts).
+
+### State legislatures
+
+```bash
+python scripts/generate_state_mock_data.py
+# Optional live members (OpenStates free key):
+python scripts/build_state_masters.py --openstates --states AZ GA MI PA
+```
+
+Streamlit secrets:
+
+```toml
+OPENSTATES_API_KEY = "your-key"
+```
+
+State lean/finance are **synthetic proxies** by default (not Cook / not OpenFEC). Optional GeoJSON: `data/state/raw/{ST}_lower.geojson` or `sldl.geojson` / `sldu.geojson`.
 
 **OpenFEC pull (historical + ongoing House cycles):**
 

@@ -33,6 +33,7 @@ from src.fec_pipeline import fetch_and_merge_fec  # noqa: E402
 from src.data_loader import list_states, load_geojson, load_master  # noqa: E402
 from src.map_builder import build_district_map, build_simple_state_centroids_map  # noqa: E402
 from src.rivs import budget_simulation, compute_rivs, format_money  # noqa: E402
+from src.ui_state import render_state_chamber_tab  # noqa: E402
 
 st.set_page_config(
     page_title=APP_TITLE,
@@ -432,10 +433,8 @@ def render_detail(row: pd.Series, fec_cycle: str) -> None:
     st.plotly_chart(fec_bars(row, cycle=fec_cycle), use_container_width=True)
 
 
-def main() -> None:
-    st.title(APP_TITLE)
-    st.markdown(f"*{APP_SUBTITLE}*")
-
+def render_federal_house_tab() -> None:
+    """US House — existing moneyball view."""
     geo = _cached_geojson()
     # Fast bootstrap for sidebar filters (states list, etc.)
     try:
@@ -443,6 +442,7 @@ def main() -> None:
     except Exception:
         bootstrap, bootstrap_label = load_master()
 
+    st.sidebar.markdown("### 🇺🇸 US House controls")
     ctl = sidebar_controls(bootstrap)
 
     fec_stats = None
@@ -698,8 +698,30 @@ $$
 
     st.markdown("---")
     st.caption(
-        "House Moneyball · local Streamlit tool · not affiliated with MLB Moneyball, "
-        "Cook Political Report, or any campaign committee."
+        "US House view · OpenFEC finance when configured · "
+        "not affiliated with MLB Moneyball or Cook Political Report."
+    )
+
+
+def main() -> None:
+    st.title(APP_TITLE)
+    st.markdown(f"*{APP_SUBTITLE}*")
+
+    tab_fed, tab_lower, tab_upper = st.tabs(
+        ["🇺🇸 US House", "🏛️ State House", "🏛️ State Senate"]
+    )
+    with tab_fed:
+        render_federal_house_tab()
+    with tab_lower:
+        # State-tab RIVS knobs live in-tab; keep federal sidebar only on House
+        render_state_chamber_tab("lower")
+    with tab_upper:
+        render_state_chamber_tab("upper")
+
+    st.markdown("---")
+    st.caption(
+        "House Moneyball · federal + state legislative RIVS · "
+        "not affiliated with MLB Moneyball, Cook Political Report, or any campaign committee."
     )
 
 
