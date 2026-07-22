@@ -155,15 +155,20 @@ def long_term_bonus(
 
 
 def derive_base_mode(df: pd.DataFrame) -> pd.Series:
-    """First-pass classify attack / defend / safe from control + PVI (no abandon yet)."""
+    """
+    First-pass classify attack / defend / safe from control + PVI.
+
+    Only seats within ~7 points of even are attack/defend. Deep seats (e.g. D+24)
+    are safe so they never rank as cheap flip targets.
+    """
     modes = []
     for _, row in df.iterrows():
         party = str(row["party_control"]).upper()
         pvi = float(row["pvi"])
         if party == "D":
-            modes.append("attack" if pvi > -12 else "safe")
+            modes.append("attack" if pvi > -7 else "safe")
         elif party == "R":
-            modes.append("defend" if pvi < 12 else "safe")
+            modes.append("defend" if pvi < 7 else "safe")
         else:
             modes.append("attack")
     return pd.Series(modes, index=df.index, name="base_mode")

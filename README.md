@@ -41,6 +41,19 @@ Runs **locally on macOS** with **mock data out of the box** (no API keys require
 
 ---
 
+## Data quality note (leans / PVI)
+
+Federal **party control + PVI-like leans** are recalibrated via
+`python scripts/recalibrate_house_master.py` (approx. 2024-map, **not** licensed Cook PVI).
+
+Example fix: **TX-07** is treated as **D+24 / safe**, with **cost to be competitive ≈ $10M+**,
+not a low-cost toss-up. Deep seats are excluded from attack/defend modes.
+
+Re-run after regenerating mock data or when leans look wrong. FEC refresh keeps leans
+and recomputes cost-to-compete from lean hardness + finance.
+
+---
+
 ## Performance (A–E)
 
 | Feature | Behavior |

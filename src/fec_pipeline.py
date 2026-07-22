@@ -78,16 +78,42 @@ def merge_finance_into_master(
             merged["fec_outside_2024"], errors="coerce"
         ).fillna(0.0)
 
-    def _hist(row: pd.Series) -> float:
-        # Prefer current cycle (2026), then prior cycles
-        for cy in (2026, 2024, 2022):
-            r = float(row.get(f"fec_raised_r_{cy}") or 0)
-            d = float(row.get(f"fec_raised_d_{cy}") or 0)
-            if r + d > 0:
-                return (r + d) * 0.35
-        return float(row.get("hist_cost_to_compete") or 500_000)
+    # Recalibrate cost-to-compete from lean hardness + FEC (not raw FEC alone)
+    try:
+        from scripts.recalibrate_house_master import cost_to_be_competitive
 
-    merged["hist_cost_to_compete"] = merged.apply(_hist, axis=1)
+        fec_r = merged.get("fec_raised_r_2026", merged.get("fec_raised_r_2024", 0))
+        fec_d = merged.get("fec_raised_d_2026", merged.get("fec_raised_d_2024", 0))
+        if hasattr(fec_r, "fillna"):
+            fr = fec_r.fillna(0)
+            fd = fec_d.fillna(0)
+            if "fec_raised_r_2024" in merged.columns:
+                fr = pd.concat([fr, merged["fec_raised_r_2024"].fillna(0)], axis=1).max(axis=1)
+                fd = pd.concat([fd, merged["fec_raised_d_2024"].fillna(0)], axis=1).max(axis=1)
+        else:
+            fr = pd.Series([0.0] * len(merged))
+            fd = fr
+        costs = [
+            cost_to_be_competitive(float(p), str(party), float(a), float(b))
+            for p, party, a, b in zip(
+                merged.get("pvi", pd.Series([0] * len(merged))),
+                merged.get("party_control", pd.Series(["R"] * len(merged))),
+                fr,
+                fd,
+            )
+        ]
+        merged["hist_cost_to_compete"] = costs
+        merged["cost_to_be_competitive"] = costs
+    except Exception:
+        def _hist(row: pd.Series) -> float:
+            for cy in (2026, 2024, 2022):
+                rr = float(row.get(f"fec_raised_r_{cy}") or 0)
+                dd = float(row.get(f"fec_raised_d_{cy}") or 0)
+                if rr + dd > 0:
+                    return (rr + dd) * 0.35
+            return float(row.get("hist_cost_to_compete") or 500_000)
+
+        merged["hist_cost_to_compete"] = merged.apply(_hist, axis=1)
 
     if "fec_candidates_2026" in merged.columns:
 
