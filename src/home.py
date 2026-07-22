@@ -65,6 +65,7 @@ def render_home(
             1.0,
             3,
             1.15,
+            None,
         )
         up = cached_state_rivs(
             up_sub if len(up_sub) else upper_df.head(500),
@@ -80,6 +81,7 @@ def render_home(
             1.0,
             3,
             1.15,
+            None,
         )
 
     c1, c2, c3, c4 = st.columns(4)

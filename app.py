@@ -646,33 +646,40 @@ def main() -> None:
     st.title(APP_TITLE)
     st.markdown(f"*{APP_SUBTITLE}*")
 
-    try:
-        fed_df, fed_lab = _cached_disk_master()
-    except Exception:
-        fed_df, fed_lab = load_master()
-    try:
-        low_df, low_lab = _cached_state("lower")
-    except Exception:
-        low_df, low_lab = load_state_master("lower")
-    try:
-        up_df, up_lab = _cached_state("upper")
-    except Exception:
-        up_df, up_lab = load_state_master("upper")
-
-    tab_home, tab_fed, tab_lower, tab_upper = st.tabs(
-        ["🏠 Home", "🇺🇸 US House", "🏛️ State House", "🏛️ State Senate"]
+    # Single active view so the left toolbar is not a stack of federal + state controls
+    view = st.sidebar.radio(
+        "View",
+        ["🏠 Home", "🇺🇸 US House", "🏛️ State House", "🏛️ State Senate"],
+        help=(
+            "Switch views here. The left toolbar changes for each view "
+            "(US House vs a specific state chamber)."
+        ),
     )
-    with tab_home:
+    st.sidebar.markdown("---")
+
+    if view == "🏠 Home":
+        try:
+            fed_df, fed_lab = _cached_disk_master()
+        except Exception:
+            fed_df, fed_lab = load_master()
+        try:
+            low_df, low_lab = _cached_state("lower")
+        except Exception:
+            low_df, low_lab = load_state_master("lower")
+        try:
+            up_df, up_lab = _cached_state("upper")
+        except Exception:
+            up_df, up_lab = load_state_master("upper")
         render_home(fed_df, fed_lab, low_df, low_lab, up_df, up_lab)
-    with tab_fed:
+    elif view == "🇺🇸 US House":
         render_federal_house_tab()
-    with tab_lower:
+    elif view == "🏛️ State House":
         render_state_chamber_tab("lower")
-    with tab_upper:
+    else:
         render_state_chamber_tab("upper")
 
     st.caption(
-        "House Moneyball · snapshot-first · live APIs on demand · "
+        "House Moneyball · snapshot-first · pick a state for chamber views · "
         "not affiliated with MLB Moneyball or Cook Political Report."
     )
 

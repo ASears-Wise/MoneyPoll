@@ -212,6 +212,7 @@ def cached_state_rivs(
     abandon_min_cost_m: float,
     abandon_alt_races: int,
     abandon_alt_gain_ratio: float,
+    target_seats: int | None = None,
 ) -> pd.DataFrame:
     return compute_state_rivs(
         df,
@@ -227,6 +228,7 @@ def cached_state_rivs(
         abandon_min_cost_m=abandon_min_cost_m,
         abandon_alt_races=abandon_alt_races,
         abandon_alt_gain_ratio=abandon_alt_gain_ratio,
+        target_seats=target_seats,
     )
 
 

@@ -28,7 +28,10 @@ def compute_state_rivs(
     pieces = []
     for state, g in df.groupby("state", sort=False):
         g = g.copy()
-        if "chamber_majority_threshold" in g.columns and g["chamber_majority_threshold"].notna().any():
+        # Prefer explicit target_seats kwarg, then per-row chamber_majority_threshold, else n//2+1
+        if "target_seats" in rivs_kwargs and rivs_kwargs["target_seats"] is not None:
+            target = int(rivs_kwargs["target_seats"])
+        elif "chamber_majority_threshold" in g.columns and g["chamber_majority_threshold"].notna().any():
             target = int(g["chamber_majority_threshold"].dropna().iloc[0])
         else:
             n = len(g)
@@ -39,7 +42,7 @@ def compute_state_rivs(
                 "abandon_min_cost_m",
                 min(float(RIVS_DEFAULTS["abandon_min_cost_m"]), 1.5),
             ),
-            **{k: v for k, v in rivs_kwargs.items() if k != "abandon_min_cost_m"},
+            **{k: v for k, v in rivs_kwargs.items() if k not in ("abandon_min_cost_m", "target_seats")},
             "target_seats": target,
         }
         # State finance columns → hist already set; map state_* to fec_* names if rivs expects outside
