@@ -78,6 +78,8 @@ FEC_API_KEY = "your-key"
 # GOOGLE_CIVIC_API_KEY = "optional"
 ```
 
+With `FEC_API_KEY` set, the app **auto-fetches** OpenFEC House candidate totals (2022/2024/2026) on first load if data is still mock-only. Results are **cached for 12 hours** (and written to `data/master.parquet` when the filesystem allows). Use the sidebar **Refresh FEC data now** button to force a new pull. Optional **Include 2024 outside spending (IE)** is slower (all 435 districts).
+
 **OpenFEC pull (historical + ongoing House cycles):**
 
 ```bash

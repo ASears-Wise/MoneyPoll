@@ -29,6 +29,7 @@ from src.charts import demographics_pie, fec_bars, parse_candidates, top_rivs_ba
 from src.civic_client import get_api_key as get_civic_key  # noqa: E402
 from src.civic_client import get_elections, safe_civic_call  # noqa: E402
 from src.fec_client import get_api_key as get_fec_key  # noqa: E402
+from src.fec_pipeline import fetch_and_merge_fec  # noqa: E402
 from src.data_loader import list_states, load_geojson, load_master  # noqa: E402
 from src.map_builder import build_district_map, build_simple_state_centroids_map  # noqa: E402
 from src.rivs import budget_simulation, compute_rivs, format_money  # noqa: E402
@@ -40,15 +41,81 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Cache OpenFEC pull for 12h so Streamlit Cloud does not re-hit the API every rerun.
+# include_outside=True is much slower (per-district IE); default off for cloud.
+@st.cache_data(ttl=12 * 3600, show_spinner="Fetching OpenFEC House finance (may take several minutes)…")
+def _cached_fec_master(include_outside: bool, cache_bust: int) -> tuple[pd.DataFrame, str, dict]:
+    """cache_bust increments to force a manual refresh."""
+    return fetch_and_merge_fec(
+        cycles=[2022, 2024, 2026],
+        include_outside=include_outside,
+        progress=False,
+        persist=True,
+    )
+
 
 @st.cache_data(show_spinner="Loading district master data…")
-def _cached_master() -> tuple[pd.DataFrame, str]:
+def _cached_disk_master() -> tuple[pd.DataFrame, str]:
     return load_master()
 
 
 @st.cache_data(show_spinner=False)
 def _cached_geojson() -> dict | None:
     return load_geojson()
+
+
+def _master_is_mock_only(df: pd.DataFrame, label: str) -> bool:
+    flags = (
+        df["data_source_flags"].astype(str)
+        if "data_source_flags" in df.columns
+        else pd.Series([""] * len(df))
+    )
+    has_openfec = flags.str.contains("openfec", case=False, na=False).any()
+    if has_openfec:
+        return False
+    return "mock" in label.lower() or flags.str.contains("mock", case=False, na=False).any()
+
+
+def resolve_master(
+    *,
+    force_refresh: bool = False,
+    include_outside: bool = False,
+    auto_fetch_if_mock: bool = True,
+) -> tuple[pd.DataFrame, str, dict | None]:
+    """
+    Prefer OpenFEC-backed master when FEC_API_KEY is available (env or Streamlit secrets).
+
+    On Streamlit Cloud: auto-pull once (cached 12h) if disk data is still mock-only.
+    """
+    fec_ok = get_fec_key() is not None
+    stats = None
+
+    if "fec_cache_bust" not in st.session_state:
+        st.session_state.fec_cache_bust = 0
+    if force_refresh:
+        st.session_state.fec_cache_bust += 1
+        _cached_fec_master.clear()
+        _cached_disk_master.clear()
+
+    if fec_ok and force_refresh:
+        df, label, stats = _cached_fec_master(include_outside, st.session_state.fec_cache_bust)
+        return df, label, stats
+
+    # Disk / mock first (fast path)
+    try:
+        disk_df, disk_label = _cached_disk_master()
+    except Exception:
+        disk_df, disk_label = load_master()
+
+    if fec_ok and auto_fetch_if_mock and _master_is_mock_only(disk_df, disk_label):
+        df, label, stats = _cached_fec_master(include_outside, st.session_state.fec_cache_bust)
+        return df, label, stats
+
+    # Key set and master already has openfec from prior persist
+    if fec_ok and not _master_is_mock_only(disk_df, disk_label):
+        return disk_df, disk_label, None
+
+    return disk_df, disk_label, None
 
 
 def sidebar_controls(df: pd.DataFrame) -> dict:
@@ -219,13 +286,33 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
     civic_ok = get_civic_key() is not None
     st.sidebar.write("OpenFEC key:", "✅ set" if fec_ok else "⚪ not set")
     st.sidebar.write("Google Civic key:", "✅ set" if civic_ok else "⚪ not set (optional)")
-    st.sidebar.caption(
-        "Refresh finance: `python scripts/fetch_fec_data.py` "
-        "([OpenFEC docs](https://api.open.fec.gov/developers/))"
+
+    st.sidebar.markdown("##### OpenFEC cloud refresh")
+    include_outside = st.sidebar.checkbox(
+        "Include 2024 outside spending (IE)",
+        value=False,
+        help="Much slower (~all 435 districts). Default is candidate totals only (2022/2024/2026).",
+        disabled=not fec_ok,
     )
+    force_fec = st.sidebar.button(
+        "Refresh FEC data now",
+        type="primary",
+        disabled=not fec_ok,
+        help="Pull from OpenFEC API and rebuild master (cached 12h unless forced).",
+    )
+    if not fec_ok:
+        st.sidebar.caption(
+            "Add `FEC_API_KEY` under Streamlit **Settings → Secrets**, then reboot the app."
+        )
+    else:
+        st.sidebar.caption(
+            "With a key set, mock-only data auto-refreshes once from OpenFEC (12h cache). "
+            "Use the button to force a new pull."
+        )
+
     if st.sidebar.button("List Civic elections (live)"):
         if not civic_ok:
-            st.sidebar.warning("Set GOOGLE_CIVIC_API_KEY in .env")
+            st.sidebar.warning("Set GOOGLE_CIVIC_API_KEY in secrets or .env")
         else:
             result, err = safe_civic_call(get_elections)
             if err:
@@ -247,6 +334,8 @@ def sidebar_controls(df: pd.DataFrame) -> dict:
         "w_defend": w_defend,
         "inc_bonus": inc_bonus,
         "open_vol": open_vol,
+        "force_fec": force_fec,
+        "include_outside": include_outside,
         "target_seats": int(target_seats),
         "budget_m": budget_m,
         "fec_cycle": fec_cycle,
@@ -347,9 +436,39 @@ def main() -> None:
     st.title(APP_TITLE)
     st.markdown(f"*{APP_SUBTITLE}*")
 
-    raw, source_label = _cached_master()
     geo = _cached_geojson()
-    ctl = sidebar_controls(raw)
+    # Fast bootstrap for sidebar filters (states list, etc.)
+    try:
+        bootstrap, bootstrap_label = _cached_disk_master()
+    except Exception:
+        bootstrap, bootstrap_label = load_master()
+
+    ctl = sidebar_controls(bootstrap)
+
+    fec_stats = None
+    source_label = bootstrap_label
+    raw = bootstrap
+    try:
+        raw, source_label, fec_stats = resolve_master(
+            force_refresh=bool(ctl.get("force_fec")),
+            include_outside=bool(ctl.get("include_outside")),
+            auto_fetch_if_mock=True,
+        )
+    except Exception as e:
+        st.error(f"OpenFEC refresh failed — using disk/mock data. ({e})")
+        raw, source_label = bootstrap, bootstrap_label
+
+    if fec_stats:
+        st.success(
+            f"OpenFEC data loaded · "
+            f"2024 raised ≈ ${fec_stats.get('raised_2024', 0)/1e9:.2f}B · "
+            f"districts with 2024 receipts: {fec_stats.get('districts_with_receipts_2024', '—')}"
+            + (
+                f" · outside 2024 ≈ ${fec_stats.get('outside_2024', 0)/1e6:.0f}M"
+                if fec_stats.get("include_outside")
+                else ""
+            )
+        )
 
     ranked = compute_rivs(
         raw,
